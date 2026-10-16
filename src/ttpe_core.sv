@@ -53,6 +53,7 @@
 
 `default_nettype none
 
+import ttpe_isa_pkg::*;
 module ttpe_core #(
     parameter [0:0] BM_WRITE_LEVEL = 1'b1
 ) (
@@ -115,8 +116,7 @@ module ttpe_core #(
     output wire [7:0]   dbg_c1
 );
 
-        import ttpe_isa_pkg::*;
-//--------------------------------------------------------------------------
+        //--------------------------------------------------------------------------
     // Fetch controller + SRAM macro
     //--------------------------------------------------------------------------
     wire        valid_instruction;

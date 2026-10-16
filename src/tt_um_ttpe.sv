@@ -20,6 +20,7 @@
 
 `default_nettype none
 
+import ttpe_isa_pkg::*;
 module tt_um_ttpe (
     input  wire [7:0] ui_in,
     output wire [7:0] uo_out,
@@ -31,8 +32,7 @@ module tt_um_ttpe (
     input  wire       rst_n
 );
 
-        import ttpe_isa_pkg::*;
-wire rst_sync_n;
+        wire rst_sync_n;
 
     ttpe_reset_sync u_rst (
         .clk       (clk),

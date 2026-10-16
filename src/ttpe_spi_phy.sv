@@ -41,6 +41,7 @@
 
 `default_nettype none
 
+import ttpe_isa_pkg::*;
 module ttpe_spi_phy (
     input  wire       clk,
     input  wire       rst_n,
@@ -61,8 +62,7 @@ module ttpe_spi_phy (
     output wire       rise_first      // SCK rising edge that carries bit 7 of a byte (comb)
 );
 
-        import ttpe_isa_pkg::*;
-//--------------------------------------------------------------------------
+        //--------------------------------------------------------------------------
     // Synchronisers
     //--------------------------------------------------------------------------
     logic sck_s1_q, sck_s2_q, sck_s3_q;

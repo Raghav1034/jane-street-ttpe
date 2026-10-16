@@ -22,6 +22,7 @@
 
 `default_nettype none
 
+import ttpe_isa_pkg::*;
 module ttpe_input_sync #(
     parameter int W = 16
 ) (
@@ -32,8 +33,7 @@ module ttpe_input_sync #(
     output wire [W-1:0] sync_prev_q
 );
 
-        import ttpe_isa_pkg::*;
-logic [W-1:0] s1_q, s2_q, s3_q;
+        logic [W-1:0] s1_q, s2_q, s3_q;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
