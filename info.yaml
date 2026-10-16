@@ -1,3 +1,7 @@
+---
+# ROM level yaml for Tiny Tapeout
+yaml_version: 6
+
 # Tiny Tapeout project information
 project:
   title:        "TTPE - Time-Triggered Protocol Engine"
@@ -55,6 +59,3 @@ pinout:
   uio[5]: "program pin 5 (bidirectional)"
   uio[6]: "program pin 6 (bidirectional)"
   uio[7]: "program pin 7 (bidirectional)"
-yaml_version: 6
-yaml_version: 6
-yaml_version: 6
