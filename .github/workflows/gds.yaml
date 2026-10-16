@@ -1,9 +1,7 @@
 name: gds
-
 on:
   push:
   workflow_dispatch:
-
 jobs:
   gds:
     runs-on: ubuntu-24.04
@@ -14,18 +12,18 @@ jobs:
           submodules: recursive
 
       - name: Debug: Inspect PDK LEF Pin Layers & Config
-      run: |
-        echo "=== Preview src/config.json ==="
-        cat src/config.json
-        echo "=== Top-level Port Declarations ==="
-        grep -E "module tt_um|input|output|inout" src/tt_um_ttpe.sv | head -n 25
-        echo "=== Search for SRAM LEF Pin Layers ==="
-        find / -path "*/ihp-sg13g2*" -name 'RM_IHPSG13_1P_512x32_c2_bm_bist.lef' 2>/dev/null | while read f; do
-          echo "Found: $f"
-          grep -E "PIN VDD|PIN VDDARRAY|PIN VSS|LAYER" "$f" | head -n 30
-        done || true
+        run: |
+          echo "=== Preview src/config.json ==="
+          cat src/config.json
+          echo "=== Top-level Port Declarations ==="
+          grep -E "module tt_um|input|output|inout" src/tt_um_ttpe.sv | head -n 25
+          echo "=== Search for SRAM LEF Pin Layers ==="
+          find / -path "*/ihp-sg13g2*" -name 'RM_IHPSG13_1P_512x32_c2_bm_bist.lef' 2>/dev/null | while read f; do
+            echo "Found: $f"
+            grep -E "PIN VDD|PIN VDDARRAY|PIN VSS|LAYER" "$f" | head -n 30
+          done || true
 
-    - name: Build GDS
+      - name: Build GDS
         uses: TinyTapeout/tt-gds-action@ttihp26b
         with:
           pdk: ihp-sg13g2
@@ -45,7 +43,6 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: recursive
-
       - name: GL test
         uses: TinyTapeout/tt-gds-action/gl_test@ttihp26b
 
@@ -53,7 +50,7 @@ jobs:
     needs: gds
     runs-on: ubuntu-24.04
     permissions:
-      pages: write # to deploy to Pages
-      id-token: write # to verify the deployment originates from an appropriate source
+      pages: write
+      id-token: write
     steps:
       - uses: TinyTapeout/tt-gds-action/viewer@ttihp26b
