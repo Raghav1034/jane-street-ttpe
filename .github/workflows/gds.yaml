@@ -13,7 +13,19 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Build GDS
+      - name: Debug: Inspect PDK LEF Pin Layers & Config
+      run: |
+        echo "=== Preview src/config.json ==="
+        cat src/config.json
+        echo "=== Top-level Port Declarations ==="
+        grep -E "module tt_um|input|output|inout" src/tt_um_ttpe.sv | head -n 25
+        echo "=== Search for SRAM LEF Pin Layers ==="
+        find / -path "*/ihp-sg13g2*" -name 'RM_IHPSG13_1P_512x32_c2_bm_bist.lef' 2>/dev/null | while read f; do
+          echo "Found: $f"
+          grep -E "PIN VDD|PIN VDDARRAY|PIN VSS|LAYER" "$f" | head -n 30
+        done || true
+
+    - name: Build GDS
         uses: TinyTapeout/tt-gds-action@ttihp26b
         with:
           pdk: ihp-sg13g2
