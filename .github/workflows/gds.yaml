@@ -7,11 +7,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: checkout repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Debug: Inspect PDK LEF Pin Layers & Config
+      - name: "Debug Inspect PDK LEF Pin Layers"
         run: |
           echo "=== Preview src/config.json ==="
           cat src/config.json
@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: checkout repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: GL test
