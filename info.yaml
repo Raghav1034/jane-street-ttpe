@@ -55,3 +55,4 @@ pinout:
   uio[5]: "program pin 5 (bidirectional)"
   uio[6]: "program pin 6 (bidirectional)"
   uio[7]: "program pin 7 (bidirectional)"
+yaml_version: 6
