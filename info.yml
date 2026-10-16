@@ -1,0 +1,57 @@
+# Tiny Tapeout project information
+project:
+  title:        "TTPE - Time-Triggered Protocol Engine"
+  author:       "TODO: your name"
+  discord:      ""
+  description:  "Programmable cycle-exact I/O engine: a 512x32 SRAM program with a 16-bit delta timer per instruction emulates UART, SPI and I2C after fabrication."
+  language:     "SystemVerilog"
+  clock_hz:     50000000
+
+  tiles: "8x2"
+
+  top_module:  "tt_um_ttpe"
+
+  # Order matters: the ISA package must come before the modules that import it.
+  # sram_512x32_bb.v is the synthesis black box of the SRAM macro (no -DSIM).
+  source_files:
+    - "ttpe_isa_pkg.sv"
+    - "ttpe_reset_sync.sv"
+    - "ttpe_input_sync.sv"
+    - "ttpe_fifo.sv"
+    - "ttpe_sram_ctrl.sv"
+    - "ttpe_mem_subsys.sv"
+    - "ttpe_exec.sv"
+    - "ttpe_core.sv"
+    - "ttpe_spi_phy.sv"
+    - "ttpe_host_spi.sv"
+    - "tt_um_ttpe.sv"
+    - "sram_512x32_bb.v"
+
+# Pin names as seen by the board (from rtl/tt_um_ttpe.sv).
+pinout:
+  ui[0]: "spi_sck (host SPI clock) / program input pin 8"
+  ui[1]: "spi_mosi (host SPI data in) / program input pin 9"
+  ui[2]: "spi_cs_n (host SPI chip select, active low) / program input pin 10"
+  ui[3]: "program input pin 11"
+  ui[4]: "program input pin 12"
+  ui[5]: "program input pin 13"
+  ui[6]: "program input pin 14"
+  ui[7]: "program input pin 15"
+
+  uo[0]: "spi_miso while CS_N is low, otherwise program output pin 8"
+  uo[1]: "program output pin 9"
+  uo[2]: "program output pin 10"
+  uo[3]: "program output pin 11"
+  uo[4]: "program output pin 12"
+  uo[5]: "program output pin 13"
+  uo[6]: "program output pin 14"
+  uo[7]: "program output pin 15"
+
+  uio[0]: "program pin 0 (bidirectional, e.g. UART TX / I2C SCL / SPI SCK)"
+  uio[1]: "program pin 1 (bidirectional)"
+  uio[2]: "program pin 2 (bidirectional)"
+  uio[3]: "program pin 3 (bidirectional)"
+  uio[4]: "program pin 4 (bidirectional)"
+  uio[5]: "program pin 5 (bidirectional)"
+  uio[6]: "program pin 6 (bidirectional)"
+  uio[7]: "program pin 7 (bidirectional)"
