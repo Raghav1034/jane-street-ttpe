@@ -1,7 +1,7 @@
 # Tiny Tapeout project information
 project:
   title:        "TTPE - Time-Triggered Protocol Engine"
-  author:       "TODO: your name"
+  author:       "Raghav Sadh"
   discord:      ""
   description:  "Programmable cycle-exact I/O engine: a 512x32 SRAM program with a 16-bit delta timer per instruction emulates UART, SPI and I2C after fabrication."
   language:     "SystemVerilog"
