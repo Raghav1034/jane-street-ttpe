@@ -60,6 +60,7 @@
 
 `default_nettype none
 
+import ttpe_isa_pkg::*;
 module ttpe_host_spi (
     input  wire         clk,
     input  wire         rst_n,

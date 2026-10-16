@@ -2,7 +2,8 @@
 // ttpe_reset_sync.sv - reset synchroniser: asynchronous assert, synchronous release.
 //
 // rst_n_out falls immediately (no clock needed) when rst_n_in falls and rises two clock
-// edges after rst_n_in rises. Every other module in the design assumes its rst_n is already
+// edges after rst_n_in rises. Every other import ttpe_isa_pkg::*;
+module in the design assumes its rst_n is already
 // synchronised to clk, so this is instantiated once at the chip top.
 //
 // The two flops reset to 0, so the reset state is defined without a clock.

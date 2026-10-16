@@ -53,6 +53,7 @@
 
 `default_nettype none
 
+import ttpe_isa_pkg::*;
 module ttpe_core #(
     parameter [0:0] BM_WRITE_LEVEL = 1'b1
 ) (

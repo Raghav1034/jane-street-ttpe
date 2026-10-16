@@ -51,7 +51,8 @@
 // PHYSICAL NOTES
 //   * All state and data registers have an ASYNCHRONOUS-assert active-low
 //     reset. rst_n must already be synchronised to `clk` (async assert,
-//     sync de-assert) at the chip top: this module does not contain the
+//     sync de-assert) at the chip top: this import ttpe_isa_pkg::*;
+module does not contain the
 //     reset synchroniser.
 //   * Macro inputs come from flops through a single mux level (host_gnt
 //     select). At 20 ns period this is far inside budget; no extra output

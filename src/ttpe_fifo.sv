@@ -24,6 +24,7 @@
 
 `default_nettype none
 
+import ttpe_isa_pkg::*;
 module ttpe_fifo #(
     parameter int W  = 8,
     parameter int AW = 3

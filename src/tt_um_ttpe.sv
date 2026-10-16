@@ -20,6 +20,7 @@
 
 `default_nettype none
 
+import ttpe_isa_pkg::*;
 module tt_um_ttpe (
     input  wire [7:0] ui_in,
     output wire [7:0] uo_out,
