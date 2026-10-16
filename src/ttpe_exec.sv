@@ -81,7 +81,6 @@ module ttpe_exec (
     output wire [7:0]   dbg_c1
 );
 
-    import ttpe_isa_pkg::*;
 
     //--------------------------------------------------------------------------
     // State

@@ -28,7 +28,7 @@ USE_PDK_SRAM   ?= 1
 
 .DEFAULT_GOAL  := sim
 
-RTL_DIR         = $(CURDIR)/../rtl
+RTL_DIR         = $(CURDIR)/../src
 SIM_DIR         = $(CURDIR)/../sim
 PDK_DIR         = $(CURDIR)/ihp_sram
 

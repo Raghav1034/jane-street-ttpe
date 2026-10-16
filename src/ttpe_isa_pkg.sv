@@ -56,3 +56,4 @@ package ttpe_isa_pkg;
   function [15:0] f_d; input [31:0] i; f_d  = i[15:0];  endfunction
 
 endpackage
+import ttpe_isa_pkg::*;
