@@ -47,9 +47,12 @@ package ttpe_isa_pkg;
   localparam logic [3:0] REG_ADDI  = 4'd11;
 
   // Instruction field slices
-  function automatic logic [3:0]  f_op (input logic [31:0] i); return i[31:28]; endfunction
-  function automatic logic [3:0]  f_a  (input logic [31:0] i); return i[27:24]; endfunction
-  function automatic logic [7:0]  f_p  (input logic [31:0] i); return i[23:16]; endfunction
-  function automatic logic [15:0] f_d  (input logic [31:0] i); return i[15:0];  endfunction
+
+
+  // Yosys-compatible Instruction field slices
+  function [3:0] f_op; input [31:0] i; f_op = i[31:28]; endfunction
+  function [3:0] f_a;  input [31:0] i; f_a  = i[27:24]; endfunction
+  function [7:0] f_p;  input [31:0] i; f_p  = i[23:16]; endfunction
+  function [15:0] f_d; input [31:0] i; f_d  = i[15:0];  endfunction
 
 endpackage
