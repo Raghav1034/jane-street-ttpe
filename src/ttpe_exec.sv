@@ -42,8 +42,6 @@
 
 `default_nettype none
 
-import ttpe_isa_pkg::*;
-
 module ttpe_exec (
     input  wire         clk,
     input  wire         rst_n,
@@ -82,6 +80,48 @@ module ttpe_exec (
     output wire [7:0]   dbg_c0,
     output wire [7:0]   dbg_c1
 );
+
+    localparam logic [3:0] OP_NOP    = ttpe_isa_pkg::OP_NOP;
+    localparam logic [3:0] OP_PINS   = ttpe_isa_pkg::OP_PINS;
+    localparam logic [3:0] OP_WAIT   = ttpe_isa_pkg::OP_WAIT;
+    localparam logic [3:0] OP_JMP    = ttpe_isa_pkg::OP_JMP;
+    localparam logic [3:0] OP_JHI    = ttpe_isa_pkg::OP_JHI;
+    localparam logic [3:0] OP_JLO    = ttpe_isa_pkg::OP_JLO;
+    localparam logic [3:0] OP_SHOUT  = ttpe_isa_pkg::OP_SHOUT;
+    localparam logic [3:0] OP_SAMPLE = ttpe_isa_pkg::OP_SAMPLE;
+    localparam logic [3:0] OP_REG    = ttpe_isa_pkg::OP_REG;
+    localparam logic [3:0] OP_DJNZ   = ttpe_isa_pkg::OP_DJNZ;
+    localparam logic [3:0] OP_HPUSH  = ttpe_isa_pkg::OP_HPUSH;
+    localparam logic [3:0] OP_HPULL  = ttpe_isa_pkg::OP_HPULL;
+    localparam logic [3:0] OP_HALT   = ttpe_isa_pkg::OP_HALT;
+    localparam logic [3:0] OP_JSB    = ttpe_isa_pkg::OP_JSB;
+
+    localparam logic [1:0] PINS_LOW    = ttpe_isa_pkg::PINS_LOW;
+    localparam logic [1:0] PINS_HIGH   = ttpe_isa_pkg::PINS_HIGH;
+    localparam logic [1:0] PINS_FLOAT  = ttpe_isa_pkg::PINS_FLOAT;
+    localparam logic [1:0] PINS_TOGGLE = ttpe_isa_pkg::PINS_TOGGLE;
+    localparam logic [1:0] WAIT_LOW  = ttpe_isa_pkg::WAIT_LOW;
+    localparam logic [1:0] WAIT_HIGH = ttpe_isa_pkg::WAIT_HIGH;
+    localparam logic [1:0] WAIT_FALL = ttpe_isa_pkg::WAIT_FALL;
+    localparam logic [1:0] WAIT_RISE = ttpe_isa_pkg::WAIT_RISE;
+
+    localparam int SHOUT_MSB_BIT   = ttpe_isa_pkg::SHOUT_MSB_BIT;
+    localparam int SHOUT_SHIFT_BIT = ttpe_isa_pkg::SHOUT_SHIFT_BIT;
+    localparam int SHOUT_OD_BIT    = ttpe_isa_pkg::SHOUT_OD_BIT;
+    localparam int SAMPLE_MSB_BIT  = ttpe_isa_pkg::SAMPLE_MSB_BIT;
+
+    localparam logic [3:0] REG_LDSR  = ttpe_isa_pkg::REG_LDSR;
+    localparam logic [3:0] REG_LDC0  = ttpe_isa_pkg::REG_LDC0;
+    localparam logic [3:0] REG_LDC1  = ttpe_isa_pkg::REG_LDC1;
+    localparam logic [3:0] REG_MVC0  = ttpe_isa_pkg::REG_MVC0;
+    localparam logic [3:0] REG_MVC1  = ttpe_isa_pkg::REG_MVC1;
+    localparam logic [3:0] REG_MVSR0 = ttpe_isa_pkg::REG_MVSR0;
+    localparam logic [3:0] REG_MVSR1 = ttpe_isa_pkg::REG_MVSR1;
+    localparam logic [3:0] REG_XORI  = ttpe_isa_pkg::REG_XORI;
+    localparam logic [3:0] REG_ANDI  = ttpe_isa_pkg::REG_ANDI;
+    localparam logic [3:0] REG_ORI   = ttpe_isa_pkg::REG_ORI;
+    localparam logic [3:0] REG_ADDI  = ttpe_isa_pkg::REG_ADDI;
+
 
     //--------------------------------------------------------------------------
     // State
