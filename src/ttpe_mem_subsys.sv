@@ -17,7 +17,6 @@
 
 `default_nettype none
 
-import ttpe_isa_pkg::*;
 module ttpe_mem_subsys #(
     parameter [0:0] BM_WRITE_LEVEL = 1'b1
 ) (
@@ -48,7 +47,8 @@ module ttpe_mem_subsys #(
     output wire         core_halted
 );
 
-    wire        a_clk;
+        import ttpe_isa_pkg::*;
+wire        a_clk;
     wire        a_men, a_wen, a_ren;
     wire [8:0]  a_addr;
     wire [31:0] a_din, a_bm, a_dout;

@@ -24,7 +24,6 @@
 
 `default_nettype none
 
-import ttpe_isa_pkg::*;
 module ttpe_fifo #(
     parameter int W  = 8,
     parameter int AW = 3
@@ -45,7 +44,8 @@ module ttpe_fifo #(
     output wire [7:0]    drop_cnt
 );
 
-    localparam int DEPTH = 1 << AW;
+        import ttpe_isa_pkg::*;
+localparam int DEPTH = 1 << AW;
 
     logic [DEPTH*W-1:0] mem_q;
     logic [AW-1:0]      wr_q, rd_q;

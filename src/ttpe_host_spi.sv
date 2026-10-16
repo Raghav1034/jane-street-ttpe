@@ -60,7 +60,6 @@
 
 `default_nettype none
 
-import ttpe_isa_pkg::*;
 module ttpe_host_spi (
     input  wire         clk,
     input  wire         rst_n,
@@ -109,7 +108,8 @@ module ttpe_host_spi (
     input  wire         mem_free
 );
 
-    localparam [6:0] R_ID      = 7'h00;
+        import ttpe_isa_pkg::*;
+localparam [6:0] R_ID      = 7'h00;
     localparam [6:0] R_STATUS  = 7'h01;
     localparam [6:0] R_CTRL    = 7'h02;
     localparam [6:0] R_PC_LO   = 7'h03;
