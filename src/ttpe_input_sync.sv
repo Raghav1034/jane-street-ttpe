@@ -22,7 +22,6 @@
 
 `default_nettype none
 
-import ttpe_isa_pkg::*;
 module ttpe_input_sync #(
     parameter int W = 16
 ) (

@@ -42,7 +42,6 @@
 
 `default_nettype none
 
-import ttpe_isa_pkg::*;
 module ttpe_exec (
     input  wire         clk,
     input  wire         rst_n,
@@ -82,8 +81,9 @@ module ttpe_exec (
     output wire [7:0]   dbg_c1
 );
 
+    import ttpe_isa_pkg::*;
 
-        //--------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     // State
     //--------------------------------------------------------------------------
     logic        cur_v_q;               // an instruction is held
