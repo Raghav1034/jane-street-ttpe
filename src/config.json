@@ -5,6 +5,7 @@
 
   "PDN_VPITCH": 75.6,
   "PDN_VOFFSET": 13.6,
+  "PDN_CFG": "dir::pdn_cfg.tcl",
 
   "MACROS": {
     "RM_IHPSG13_1P_512x32_c2_bm_bist": {
