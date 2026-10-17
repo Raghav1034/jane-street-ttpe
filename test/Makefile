@@ -87,7 +87,7 @@ endif
 COMPILE_ARGS   += -g2012 -Wall -Wno-timescale -DSIM $(SRAM_ARGS)
 
 SIM_BUILD            = sim_build_$(TARGET)_$(SRAM_TAG)
-COCOTB_RESULTS_FILE  = results_$(TARGET)_$(SRAM_TAG).xml
+COCOTB_RESULTS_FILE  ?= results.xml
 export COCOTB_RESULTS_FILE
 
 # cocotb 1.x selects tests with MODULE, cocotb 2.x with COCOTB_TEST_MODULES

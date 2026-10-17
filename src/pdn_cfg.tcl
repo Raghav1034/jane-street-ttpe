@@ -14,7 +14,8 @@ add_pdn_stripe \
     -width $::env(PDN_VWIDTH) \
     -pitch $::env(PDN_VPITCH) \
     -offset $::env(PDN_VOFFSET) \
-    -starts_with POWER
+    -starts_with POWER \
+    -extend_to_boundary
 
 if { $::env(PDN_ENABLE_RAILS) == 1 } {
     add_pdn_stripe \
@@ -46,6 +47,15 @@ add_pdn_stripe \
     -pitch 20.0 \
     -offset 2.0 \
     -starts_with POWER
+
+add_pdn_stripe \
+    -grid macro \
+    -layer $::env(PDN_VERTICAL_LAYER) \
+    -width $::env(PDN_VWIDTH) \
+    -pitch $::env(PDN_VPITCH) \
+    -offset $::env(PDN_VOFFSET) \
+    -starts_with POWER \
+    -extend_to_boundary
 
 add_pdn_connect -grid macro -layers "Metal4 Metal5"
 add_pdn_connect -grid macro -layers "Metal5 $::env(PDN_VERTICAL_LAYER)"
