@@ -1,13 +1,10 @@
 {
-  "project": {
-    "yaml_version": 6
-  },
   "PL_RESIZER_HOLD_SLACK_MARGIN": 0.1,
   "GRT_RESIZER_HOLD_SLACK_MARGIN": 0.05,
+  "PL_TARGET_DENSITY_PCT": 50,
 
   "PDN_VPITCH": 75.6,
   "PDN_VOFFSET": 13.6,
-  "OpenROAD.IRDropReport": null,
 
   "MACROS": {
     "RM_IHPSG13_1P_512x32_c2_bm_bist": {
@@ -28,7 +25,7 @@
   },
 
   "PDN_MACRO_CONNECTIONS": [
-    ".*u_sram.* VPWR VGND VDD! VSS!",
-    ".*u_sram.* VPWR VGND VDDARRAY! VSS!"
+    "u_core.u_mem.u_sram VPWR VGND VDD! VSS!",
+    "u_core.u_mem.u_sram VPWR VGND VDDARRAY! VSS!"
   ]
 }
