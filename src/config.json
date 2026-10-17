@@ -7,9 +7,6 @@
   "PDN_VOFFSET": 13.6,
   "PDN_CFG": "dir::pdn_cfg.tcl",
 
-  "RUN_IRDROP_REPORT": false,
-  "OpenROAD.IRDropReport": null,
-
   "MACROS": {
     "RM_IHPSG13_1P_512x32_c2_bm_bist": {
       "instances": {
@@ -29,8 +26,6 @@
   },
 
   "PDN_MACRO_CONNECTIONS": [
-    ".*u_sram.* VPWR VGND VDD! VSS!",
-    ".*u_sram.* VPWR VGND VDDARRAY! VSS!",
     "u_core.u_mem.u_sram VPWR VGND VDD! VSS!",
     "u_core.u_mem.u_sram VPWR VGND VDDARRAY! VSS!"
   ]
