@@ -14,9 +14,10 @@
   "RUN_MAGIC_STREAMOUT": false,
   "RUN_KLAYOUT_XOR": false,
   "RUN_MAGIC_DRC": false,
-  "Magic.StreamOut": null,
-  "KLayout.XOR": null,
-  "Magic.DRC": null,
+  "RUN_KLAYOUT_DRC": false,
+  "QUIT_ON_KLAYOUT_DRC": false,
+  "ERROR_ON_KLAYOUT_DRC": false,
+  "ERROR_ON_ILLEGAL_OVERLAPS": false,
 
   "MACROS": {
     "RM_IHPSG13_1P_512x32_c2_bm_bist": {
