@@ -28,6 +28,9 @@ jobs:
           cat runs/wokwi/*-openroad-generatepdn/openroad-generatepdn.log 2>/dev/null | tail -n 80 || true
           echo "=== 3. IRDropReport Log Excerpt ==="
           cat runs/wokwi/*-openroad-irdropreport/openroad-irdropreport.log 2>/dev/null | head -n 60 || true
+          echo "=== 4. All Executed LibreLane Steps & Final Signoff Status ==="
+          ls -1d runs/wokwi/[0-9]* 2>/dev/null || true
+          grep -rnE "ERROR| Critical" runs/wokwi/[5-9]*/*.log 2>/dev/null | tail -n 50 || true
 
   precheck:
     needs: gds

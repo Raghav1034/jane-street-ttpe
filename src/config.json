@@ -7,6 +7,14 @@
   "PDN_VOFFSET": 13.6,
   "PDN_CFG": "dir::pdn_cfg.tcl",
 
+  "PRIMARY_GDSII_STREAMOUT_TOOL": "klayout",
+  "RUN_MAGIC_STREAMOUT": false,
+  "RUN_KLAYOUT_XOR": false,
+  "RUN_MAGIC_DRC": false,
+  "Magic.StreamOut": null,
+  "KLayout.XOR": null,
+  "Magic.DRC": null,
+
   "MACROS": {
     "RM_IHPSG13_1P_512x32_c2_bm_bist": {
       "instances": {
