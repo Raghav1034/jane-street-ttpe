@@ -10,17 +10,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: "Debug and Patch SRAM LEF pin names"
+      - name: "Debug: Inspect SRAM LEF Pin Layers & Config"
         run: |
-          set -eux
           echo "=== Preview src/config.json ==="
           cat src/config.json
-          echo "=== Patching LEF ==="
-          find / -path "*/ihp-sg13g2*" -type f -name '*.lef' 2>/dev/null | while read -r f; do
-            echo "Inspecting $f"
-            sed -i 's/\bVDDARRAY\b/VDD/g' "$f" || true
-            sed -i 's/\bVSSARRAY\b/VSS/g' "$f" || true
-          done || true
+          echo "=== Top-level Port Declarations ==="
+          grep -E "module tt_um|input|output|inout" src/tt_um_ttpe.sv | head -n 25
+          echo "=== Check pdn_cfg.tcl ==="
+          cat src/pdn_cfg.tcl
       - name: Build GDS
         uses: TinyTapeout/tt-gds-action@ttihp26b
         with:
