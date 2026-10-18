@@ -8,6 +8,7 @@
 #   make USE_PDK_SRAM=0 [TARGET=...]  use the stand-in macro model in ../sim instead
 #   make lint [TARGET=...]            iverilog elaboration with -Wall (no simulation)
 #   make lint-all                     lint for mem, core and top, both SRAM models
+#   GATES=yes make                    gate-level test of tt_submission netlist (used by the gl_test CI job)
 #   make clean
 #
 # Variables
@@ -25,6 +26,13 @@ SIM            ?= icarus
 TOPLEVEL_LANG   = verilog
 TARGET         ?= mem
 USE_PDK_SRAM   ?= 1
+
+# Gate-level mode (CI job gl_test): the chip-level pin tests run on tb.v around the netlist that the
+# GDS action copies to test/gate_level_netlist.v. Results go to results.xml (what the action reads).
+ifeq ($(GATES),yes)
+  override TARGET       := top
+  override USE_PDK_SRAM := 1
+endif
 
 .DEFAULT_GOAL  := sim
 
@@ -66,27 +74,45 @@ else ifeq ($(TARGET),core)
                     $(RTL_DIR)/ttpe_core.sv \
                     $(SRAM_SRC)
 else ifeq ($(TARGET),top)
-  TOPLEVEL        = tt_um_ttpe
   TEST_MODULE     = test_ttpe_top
-  VERILOG_SOURCES = $(RTL_DIR)/ttpe_isa_pkg.sv \
-                    $(RTL_DIR)/ttpe_sram_ctrl.sv \
-                    $(RTL_DIR)/ttpe_mem_subsys.sv \
-                    $(RTL_DIR)/ttpe_input_sync.sv \
-                    $(RTL_DIR)/ttpe_fifo.sv \
-                    $(RTL_DIR)/ttpe_exec.sv \
-                    $(RTL_DIR)/ttpe_core.sv \
-                    $(RTL_DIR)/ttpe_reset_sync.sv \
-                    $(RTL_DIR)/ttpe_spi_phy.sv \
-                    $(RTL_DIR)/ttpe_host_spi.sv \
-                    $(RTL_DIR)/tt_um_ttpe.sv \
-                    $(SRAM_SRC)
+  ifeq ($(GATES),yes)
+    TOPLEVEL        = tb
+    CELLS_DIR       = $(PDK_ROOT)/ihp-sg13cmos5l/libs.ref
+    VERILOG_SOURCES = $(CELLS_DIR)/sg13cmos5l_io/verilog/sg13cmos5l_io.v \
+                      $(CELLS_DIR)/sg13cmos5l_stdcell/verilog/sg13cmos5l_stdcell.v \
+                      $(CELLS_DIR)/sg13cmos5l_stdcell/verilog/sg13cmos5l_udp.v \
+                      $(CURDIR)/gate_level_netlist.v \
+                      $(SRAM_SRC) \
+                      $(CURDIR)/tb.v
+  else
+    TOPLEVEL        = tt_um_ttpe
+    VERILOG_SOURCES = $(RTL_DIR)/ttpe_isa_pkg.sv \
+                      $(RTL_DIR)/ttpe_sram_ctrl.sv \
+                      $(RTL_DIR)/ttpe_mem_subsys.sv \
+                      $(RTL_DIR)/ttpe_input_sync.sv \
+                      $(RTL_DIR)/ttpe_fifo.sv \
+                      $(RTL_DIR)/ttpe_exec.sv \
+                      $(RTL_DIR)/ttpe_core.sv \
+                      $(RTL_DIR)/ttpe_reset_sync.sv \
+                      $(RTL_DIR)/ttpe_spi_phy.sv \
+                      $(RTL_DIR)/ttpe_host_spi.sv \
+                      $(RTL_DIR)/tt_um_ttpe.sv \
+                      $(SRAM_SRC)
+  endif
 else
   $(error TARGET must be mem, core or top, got '$(TARGET)')
 endif
 
 COMPILE_ARGS   += -g2012 -Wall -Wno-timescale -DSIM $(SRAM_ARGS)
+ifeq ($(GATES),yes)
+  COMPILE_ARGS += -DGL_TEST -DFUNCTIONAL
+endif
 
-SIM_BUILD            = sim_build_$(TARGET)_$(SRAM_TAG)
+ifeq ($(GATES),yes)
+  SIM_BUILD            = sim_build_gl
+else
+  SIM_BUILD            = sim_build_$(TARGET)_$(SRAM_TAG)
+endif
 ifeq ($(GATES),yes)
   COCOTB_RESULTS_FILE := results.xml
 else
