@@ -1,7 +1,9 @@
 name: gds
+
 on:
   push:
   workflow_dispatch:
+
 jobs:
   gds:
     runs-on: ubuntu-24.04
@@ -16,15 +18,28 @@ jobs:
         with:
           pdk: ihp-sg13cmos5l
 
-      - name: Post-Build Read-Only PDN Diagnostics
+      - name: Post-Build Signoff Summary
         if: always()
         run: |
-          echo "=== 1. GeneratePDN Log Excerpt ==="
-          cat runs/wokwi/*-openroad-generatepdn/openroad-generatepdn.log 2>/dev/null | tail -n 80 || true
-          echo "=== 2. IRDropReport Log Excerpt ==="
-          cat runs/wokwi/*-openroad-irdropreport/openroad-irdropreport.log 2>/dev/null | head -n 60 || true
-          echo "=== 3. KLayout DRC Errors ==="
+          echo "=== 1. GeneratePDN & Bridge Summary ==="
+          grep -E "ttpe pdn_cfg:|PDN-" runs/wokwi/*-openroad-generatepdn/openroad-generatepdn.log 2>/dev/null || true
+          cat runs/wokwi/*-openroad-generatepdn/openroad-generatepdn.log 2>/dev/null | tail -n 60 || true
+          echo "=== 2. PDN & IR-Drop Summary ==="
+          grep -E "PSM-|Worstcase|Percentage drop" runs/wokwi/*-openroad-irdropreport/openroad-irdropreport.log 2>/dev/null || true
+          echo "=== 3. KLayout DRC Summary ==="
           cat runs/wokwi/*checker-klayoutdrc/checker-klayoutdrc.log 2>/dev/null || true
+          python3 -c "
+          import glob, xml.etree.ElementTree as ET, collections
+          for p in glob.glob('runs/wokwi/*klayout-drc*/*.lydrc') + glob.glob('runs/wokwi/*klayout-drc*/*.xml') + glob.glob('runs/wokwi/*klayout-drc*/reports/*.lyrdb'):
+              print('Report:', p)
+              tree = ET.parse(p)
+              counts = collections.Counter(el.findtext('category') for el in tree.findall('.//item'))
+              print('Total DRC items:', sum(counts.values()))
+              for k, v in counts.most_common(15):
+                  print(f'  {v:5d}x  {k}')
+          " || true
+          echo "=== 4. Final Executed Steps ==="
+          ls -1d runs/wokwi/[0-9]* 2>/dev/null || true
 
   precheck:
     needs: gds
@@ -41,6 +56,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
       - name: GL test
         uses: TinyTapeout/tt-gds-action/gl_test@ihp-cmos5l
 
