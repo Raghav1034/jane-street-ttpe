@@ -6,19 +6,11 @@
   "GRT_RESIZER_HOLD_SLACK_MARGIN": 0.05,
   "PL_TARGET_DENSITY_PCT": 50,
 
-  "TOP_MARGIN_MULT": 1,
-  "BOTTOM_MARGIN_MULT": 1,
-  "LEFT_MARGIN_MULT": 6,
-  "RIGHT_MARGIN_MULT": 6,
-
   "PDN_VPITCH": 75.6,
   "PDN_VOFFSET": 13.6,
   "PDN_CFG": "dir::pdn_cfg.tcl",
-  "PDN_EXTEND_TO": "boundary",
 
   "PRIMARY_GDSII_STREAMOUT_TOOL": "klayout",
-  "KLAYOUT_DEF_LAYER_MAP": "dir::sg13g2.map",
-  "MAGIC_WRITE_LEF_PINONLY": 1,
   "RUN_MAGIC_STREAMOUT": false,
   "RUN_KLAYOUT_XOR": false,
   "RUN_MAGIC_DRC": false,
