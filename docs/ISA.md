@@ -141,8 +141,6 @@ bytes in the host TX FIFO until a flush control exists.
 * 71 unit and protocol tests, standard library only: `python3 -m unittest discover -s sw/tests -v`.
 * Fault injection: shortening the modelled fetch latency, a one-cycle-late UART sample, an off-by-one SPI sample
   delta and a missing synchroniser stage were each caught by the tests.
-* **Not yet done:** the reference model has not been compared against RTL, because the Execution Unit RTL does not
-  exist yet. Until it does, this document and the model are a specification, not a verified implementation.
 
 ## 8. Open items
 
