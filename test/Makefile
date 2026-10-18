@@ -87,7 +87,11 @@ endif
 COMPILE_ARGS   += -g2012 -Wall -Wno-timescale -DSIM $(SRAM_ARGS)
 
 SIM_BUILD            = sim_build_$(TARGET)_$(SRAM_TAG)
-COCOTB_RESULTS_FILE  = results_$(TARGET)_$(SRAM_TAG).xml
+ifeq ($(GATES),yes)
+  COCOTB_RESULTS_FILE := results.xml
+else
+  COCOTB_RESULTS_FILE  = results_$(TARGET)_$(SRAM_TAG).xml
+endif
 export COCOTB_RESULTS_FILE
 
 # cocotb 1.x selects tests with MODULE, cocotb 2.x with COCOTB_TEST_MODULES
@@ -134,4 +138,4 @@ synth-check:
 	yosys -q -p "read_verilog -sv $(SYNTH_SRC); hierarchy -check -top tt_um_ttpe; proc; opt_clean; stat"
 
 clean-all: clean
-	rm -rf sim_build_* results_*.xml lint_*.vvp __pycache__
+	rm -rf sim_build_* results_*.xml results.xml lint_*.vvp __pycache__
