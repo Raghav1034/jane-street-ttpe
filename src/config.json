@@ -48,8 +48,6 @@
   "PDN_VSPACING": 3.52,
   "PDN_VPITCH": 44.96,
   "PDN_VOFFSET": 6.15,
-  "PDN_VERTICAL_LAYER": "Metal4",
-  "PDN_HORIZONTAL_LAYER": "TopMetal1",
   "PDN_MACRO_CONNECTIONS": [
     "u_core\\.u_mem\\.u_sram VPWR VGND VDD! VSS!",
     "u_core\\.u_mem\\.u_sram VPWR VGND VDDARRAY! VSS!"
