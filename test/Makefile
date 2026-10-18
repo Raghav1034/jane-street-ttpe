@@ -165,3 +165,13 @@ synth-check:
 
 clean-all: clean
 	rm -rf sim_build_* results_*.xml results.xml lint_*.vvp __pycache__
+
+# ---- gate-level CI: make the results file pass the gl_test action's check ----------------------
+# The action runs `! grep failure results.xml`. cocotb 2.1 writes failures="0" into a passing run,
+# which that grep matches. Remove the zero counters; real failures still appear as <failure> elements.
+ifeq ($(GATES),yes)
+.DEFAULT_GOAL := gl
+.PHONY: gl
+gl: sim
+	sed -i -E 's/ (failures|errors|skipped)="0"//g' $(COCOTB_RESULTS_FILE)
+endif
