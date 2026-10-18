@@ -1,44 +1,83 @@
 {
-  "FP_SIZING": "absolute",
-  "DIE_AREA": [0, 0, 1289.28, 710.64],
-
+  "//1": "Baseline = TinyTapeout/ttihp-verilog-template branch cmos5l. Additions: MACROS, PDN alignment, DRC/overlap settings from the Pettit SRAM walkthrough.",
+  "PL_TARGET_DENSITY_PCT": 60,
+  "CLOCK_PERIOD": 20,
   "PL_RESIZER_HOLD_SLACK_MARGIN": 0.1,
   "GRT_RESIZER_HOLD_SLACK_MARGIN": 0.05,
-  "PL_TARGET_DENSITY_PCT": 50,
-
-  "PDN_VPITCH": 75.6,
-  "PDN_VOFFSET": 13.6,
-  "PDN_CFG": "dir::pdn_cfg.tcl",
-
-  "PRIMARY_GDSII_STREAMOUT_TOOL": "klayout",
-  "RUN_MAGIC_STREAMOUT": false,
-  "RUN_KLAYOUT_XOR": false,
-  "RUN_MAGIC_DRC": false,
-  "RUN_KLAYOUT_DRC": false,
-  "QUIT_ON_KLAYOUT_DRC": false,
-  "ERROR_ON_KLAYOUT_DRC": false,
-  "ERROR_ON_ILLEGAL_OVERLAPS": false,
-
+  "RUN_LINTER": 1,
+  "LINTER_INCLUDE_PDK_MODELS": 1,
+  "CLOCK_PORT": "clk",
+  "DESIGN_REPAIR_BUFFER_OUTPUT_PORTS": 0,
+  "TOP_MARGIN_MULT": 1,
+  "BOTTOM_MARGIN_MULT": 1,
+  "LEFT_MARGIN_MULT": 6,
+  "RIGHT_MARGIN_MULT": 6,
+  "FP_SIZING": "absolute",
+  "GRT_ALLOW_CONGESTION": 1,
+  "FP_IO_HLENGTH": 2,
+  "FP_IO_VLENGTH": 2,
+  "RUN_CTS": 1,
+  "MAGIC_DEF_LABELS": 0,
+  "MAGIC_WRITE_LEF_PINONLY": 1,
+  "//2": "SRAM mid-height (y=249.48 = 66 rows) so both its top and bottom supply columns have tile stripes to bridge to.",
   "MACROS": {
     "RM_IHPSG13_1P_512x32_c2_bm_bist": {
+      "gds": [
+        "pdk_dir::libs.ref/sg13cmos5l_sram/gds/RM_IHPSG13_1P_512x32_c2_bm_bist.gds"
+      ],
+      "lef": [
+        "pdk_dir::libs.ref/sg13cmos5l_sram/lef/RM_IHPSG13_1P_512x32_c2_bm_bist.lef"
+      ],
+      "spice": [
+        "pdk_dir::libs.ref/sg13cmos5l_sram/cdl/RM_IHPSG13_1P_512x32_c2_bm_bist.cdl"
+      ],
+      "nl": [],
+      "spef": {},
+      "lib": {
+        "nom_typ_1p20V_25C": [
+          "pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_512x32_c2_bm_bist_typ_1p20V_25C.lib"
+        ],
+        "nom_fast_1p32V_m40C": [
+          "pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_512x32_c2_bm_bist_fast_1p32V_m55C.lib"
+        ],
+        "nom_slow_1p08V_125C": [
+          "pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_512x32_c2_bm_bist_slow_1p08V_125C.lib"
+        ]
+      },
       "instances": {
         "u_core.u_mem.u_sram": {
-          "location": [50, 50],
+          "location": [
+            3.36,
+            249.48
+          ],
           "orientation": "N"
         }
-      },
-      "lef":  ["pdk_dir::libs.ref/sg13g2_sram/lef/RM_IHPSG13_1P_512x32_c2_bm_bist.lef"],
-      "gds":  ["pdk_dir::libs.ref/sg13g2_sram/gds/RM_IHPSG13_1P_512x32_c2_bm_bist.gds"],
-      "lib":  {
-        "nom_typ_1p20V_25C":   ["pdk_dir::libs.ref/sg13g2_sram/lib/RM_IHPSG13_1P_512x32_c2_bm_bist_typ_1p20V_25C.lib"],
-        "nom_fast_1p32V_m40C": ["pdk_dir::libs.ref/sg13g2_sram/lib/RM_IHPSG13_1P_512x32_c2_bm_bist_fast_1p32V_m55C.lib"],
-        "nom_slow_1p08V_125C": ["pdk_dir::libs.ref/sg13g2_sram/lib/RM_IHPSG13_1P_512x32_c2_bm_bist_slow_1p08V_125C.lib"]
       }
     }
   },
-
+  "FP_MACRO_HORIZONTAL_HALO": 2,
+  "ROUTING_OBSTRUCTIONS": [
+    "Metal2 3.36 249.48 420.0 441.98",
+    "Metal3 3.36 249.48 420.0 441.98",
+    "Metal4 3.36 249.48 420.0 441.98"
+  ],
+  "//3": "Single-layer Metal4 PDN. VOFFSET 16.84 phases the stripe grid so every stripe crossing the SRAM lands on a supply column (VOFFSET 6.15 left 3 stripes off-column -> precheck pin_check errors). src/pdn_cfg.tcl bridges the columns (the stock macro grid fails with PDN-0232/0233).",
+  "FP_PDN_MULTILAYER": 0,
+  "FP_PDN_VWIDTH": 2.1,
+  "FP_PDN_VSPACING": 3.52,
+  "FP_PDN_VPITCH": 44.96,
+  "FP_PDN_VOFFSET": 16.84,
   "PDN_MACRO_CONNECTIONS": [
     "u_core.u_mem.u_sram VPWR VGND VDD! VSS!",
     "u_core.u_mem.u_sram VPWR VGND VDDARRAY! VSS!"
-  ]
+  ],
+  "//4": "Sign-off: Magic DRC off, KLayout DRC on with the CMOS5L deck, overlap waiver (reference doc, 22 known overlaps).",
+  "RUN_MAGIC_DRC": 0,
+  "ERROR_ON_ILLEGAL_OVERLAPS": 0,
+  "RUN_KLAYOUT_DRC": 1,
+  "KLAYOUT_DRC_RUNSET": "pdk_dir::libs.tech/klayout/tech/drc/ihp-sg13cmos5l.drc",
+  "RUN_KLAYOUT_XOR": 0,
+  "PDN_CFG": "dir::pdn_cfg.tcl",
+  "PDN_VERTICAL_LAYER": "Metal4",
+  "PDN_HORIZONTAL_LAYER": "TopMetal1"
 }

@@ -26,15 +26,15 @@ jobs:
       - name: Run tests
         run: |
           cd test
-          make clean
-          make
-          # make will return success even if the tests fail, so check results.xml for failed tests
-          python -m cocotb_tools.check_results results.xml
+          make clean-all
+          make regress
+          # make returns success even if tests fail, so check every results file
+          for f in results_*.xml; do python -m cocotb_tools.check_results "$f"; done
 
       - name: Test Summary
         uses: test-summary/action@v2.4
         with:
-          paths: "test/results.xml"
+          paths: "test/results_*.xml"
         if: always()
 
       - name: upload waveform and test results
@@ -44,5 +44,5 @@ jobs:
           name: test-results
           path: |
             test/tb.fst
-            test/results.xml
+            test/results_*.xml
             test/output/*
