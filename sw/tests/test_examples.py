@@ -324,7 +324,8 @@ class I2cMaster(unittest.TestCase):
 class AllExamples(unittest.TestCase):
     def test_program_sizes(self):
         sizes = {fn: sum(load(fn).used) for fn in sorted(os.listdir(EX_DIR)) if fn.endswith(".asm")}
-        self.assertEqual(set(sizes), {"uart_tx.asm", "uart_rx.asm", "spi_master.asm", "i2c_master.asm"})
+        self.assertEqual(set(sizes), {"uart_tx.asm", "uart_rx.asm", "spi_master.asm", "i2c_master.asm",
+                                    "usb_rx.asm"})   # usb_rx: needs the proposed ttpe_usb_rx primitive
         for fn, n in sizes.items():
             self.assertLess(n, 128, "%s uses %d words" % (fn, n))
 

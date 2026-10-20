@@ -3,6 +3,7 @@
 #   make                              memory subsystem tests against the PDK SRAM models
 #   make TARGET=core                  core (Execution Unit + FIFOs + memory) lockstep tests
 #   make TARGET=top                   chip level (tt_um_ttpe) tests, strictly through the pins
+#   make TARGET=usb                   USB low-speed bit slicer (ttpe_usb_rx) vs sw/usb_ls.py, per cycle
 #   make regress                      lint-all, then all three targets with the PDK models and
 #                                     then with the stand-in model
 #   make USE_PDK_SRAM=0 [TARGET=...]  use the stand-in macro model in ../sim instead
@@ -12,7 +13,7 @@
 #   make clean
 #
 # Variables
-#   TARGET        mem | core | top             (default mem)
+#   TARGET        mem | core | top | usb      (default mem)
 #   USE_PDK_SRAM  1 = vendor models in test/ihp_sram (default), 0 = ../sim stand-in
 #
 # Each (TARGET, SRAM model) pair has its own build directory and results file, so runs
@@ -70,9 +71,14 @@ else ifeq ($(TARGET),core)
                     $(RTL_DIR)/ttpe_mem_subsys.sv \
                     $(RTL_DIR)/ttpe_input_sync.sv \
                     $(RTL_DIR)/ttpe_fifo.sv \
+                    $(RTL_DIR)/ttpe_usb_rx.sv \
                     $(RTL_DIR)/ttpe_exec.sv \
                     $(RTL_DIR)/ttpe_core.sv \
                     $(SRAM_SRC)
+else ifeq ($(TARGET),usb)
+  TOPLEVEL        = ttpe_usb_rx
+  TEST_MODULE     = test_ttpe_usb
+  VERILOG_SOURCES = $(RTL_DIR)/ttpe_usb_rx.sv
 else ifeq ($(TARGET),top)
   TEST_MODULE     = test_ttpe_top
   ifeq ($(GATES),yes)
@@ -91,6 +97,7 @@ else ifeq ($(TARGET),top)
                       $(RTL_DIR)/ttpe_mem_subsys.sv \
                       $(RTL_DIR)/ttpe_input_sync.sv \
                       $(RTL_DIR)/ttpe_fifo.sv \
+                      $(RTL_DIR)/ttpe_usb_rx.sv \
                       $(RTL_DIR)/ttpe_exec.sv \
                       $(RTL_DIR)/ttpe_core.sv \
                       $(RTL_DIR)/ttpe_reset_sync.sv \
@@ -100,7 +107,7 @@ else ifeq ($(TARGET),top)
                       $(SRAM_SRC)
   endif
 else
-  $(error TARGET must be mem, core or top, got '$(TARGET)')
+  $(error TARGET must be mem, core, top or usb, got '$(TARGET)')
 endif
 
 COMPILE_ARGS   += -g2012 -Wall -Wno-timescale -DSIM $(SRAM_ARGS)
@@ -133,7 +140,7 @@ include $(shell cocotb-config --makefiles)/Makefile.sim
 .PHONY: lint lint-all regress synth-check clean-all
 
 SYNTH_SRC = $(RTL_DIR)/ttpe_isa_pkg.sv $(RTL_DIR)/ttpe_sram_ctrl.sv $(RTL_DIR)/ttpe_mem_subsys.sv \
-            $(RTL_DIR)/ttpe_input_sync.sv $(RTL_DIR)/ttpe_fifo.sv $(RTL_DIR)/ttpe_exec.sv \
+            $(RTL_DIR)/ttpe_input_sync.sv $(RTL_DIR)/ttpe_fifo.sv $(RTL_DIR)/ttpe_usb_rx.sv $(RTL_DIR)/ttpe_exec.sv \
             $(RTL_DIR)/ttpe_core.sv $(RTL_DIR)/ttpe_reset_sync.sv $(RTL_DIR)/ttpe_spi_phy.sv \
             $(RTL_DIR)/ttpe_host_spi.sv $(RTL_DIR)/tt_um_ttpe.sv $(RTL_DIR)/sram_512x32_bb.v
 
@@ -145,6 +152,7 @@ lint-all:
 	$(MAKE) TARGET=mem  USE_PDK_SRAM=1 lint
 	$(MAKE) TARGET=core USE_PDK_SRAM=1 lint
 	$(MAKE) TARGET=top  USE_PDK_SRAM=1 lint
+	$(MAKE) TARGET=usb  lint
 	$(MAKE) TARGET=mem  USE_PDK_SRAM=0 lint
 	$(MAKE) TARGET=core USE_PDK_SRAM=0 lint
 	$(MAKE) TARGET=top  USE_PDK_SRAM=0 lint
@@ -153,6 +161,7 @@ regress: lint-all
 	$(MAKE) TARGET=mem  USE_PDK_SRAM=1 sim
 	$(MAKE) TARGET=core USE_PDK_SRAM=1 sim
 	$(MAKE) TARGET=top  USE_PDK_SRAM=1 sim
+	$(MAKE) TARGET=usb  sim
 	$(MAKE) TARGET=mem  USE_PDK_SRAM=0 sim
 	$(MAKE) TARGET=core USE_PDK_SRAM=0 sim
 	$(MAKE) TARGET=top  USE_PDK_SRAM=0 sim

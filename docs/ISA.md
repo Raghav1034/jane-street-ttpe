@@ -118,7 +118,7 @@ options: -D NAME=VALUE   --allow-short-delta
 
 Syntax: `label:`, `; comment`, `<mnemonic> operands @ delta`, `.equ`, `.default`, `.org`, `.word`,
 `.if/.else/.endif`, `.macro/.endm` (`\p` parameter, `\@` unique id), `DELAY n`. Delta and immediates accept
-integer expressions. Pins are `uio0..7`, `ui0..7`, `uo0..7`. Conditional branches to another 256-word page
+integer expressions. Pins are `uio0..7`, `ui0..7`, `uo0..7` (source pins 12..15 = `ui4..7` can be virtual USB pins when host register MODE[0] is set, see USB_LS_RX.md; the ISA itself is unchanged). Conditional branches to another 256-word page
 are an assembly error (use a local `JMP`).
 
 ## 6. Example programs (`sw/examples`)

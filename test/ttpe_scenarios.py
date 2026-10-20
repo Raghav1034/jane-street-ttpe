@@ -18,6 +18,7 @@ import random
 import ttpe_asm as asm
 import ttpe_isa as isa
 import ttpe_world as W
+import usb_ls as U
 from ttpe_lockstep import DefaultPolicy, MAX_RX, MAX_TX
 
 EX_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sw", "examples")
@@ -25,9 +26,10 @@ HALT_WORD = isa.encode(isa.OPCODES["HALT"])
 
 
 class Scenario:
-    def __init__(self, name, words, world, policy, cycles, check=None):
+    def __init__(self, name, words, world, policy, cycles, check=None, usb_en=False):
         self.name, self.words, self.world = name, words, world
         self.policy, self.cycles, self.check = policy, cycles, check
+        self.usb_en = usb_en            # initial value of the core input usb_en (MODE[0])
 
 
 def pad512(words):
@@ -671,6 +673,128 @@ def scn_fuzz(seed, cycles=1500):
     pol = DefaultPolicy(resume_on_halt=resume_pc, halt_gap=hrng.randrange(1, 8), rx_drain=False,
                         extra=extra)
     return Scenario("fuzz_%d" % seed, pad512(words), w, pol, cycles, None)
+
+
+# ------------------------------------------------------------------ low-speed USB receive (Phase D)
+class UsbSource:
+    """Drives D+ (uio6) and D- (uio7) from per-cycle lists; a pad is pulled low when its line is 0.
+    Beyond the lists the bus idles in J (D+ 0, D- 1)."""
+
+    def __init__(self, dp, dm):
+        self.dp, self.dm = dp, dm
+
+    def step(self, k, pad_prev):
+        dp, dm = (self.dp[k], self.dm[k]) if k < len(self.dp) else (0, 1)
+        return (0 if dp else 0x40) | (0 if dm else 0x80)
+
+
+def usb_pkts(kind=0):
+    if kind == 0:
+        return [U.token("SETUP", 0, 0),
+                U.data_packet("DATA0", [0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x12, 0x00]),
+                [U.pid_byte(U.PID["ACK"])]]
+    return [U.token("IN", 0x15, 0xA), U.data_packet("DATA1", [0xFF] * 8)]
+
+
+def usb_toggles(ls, bit):
+    """number of level changes of uo_out[bit] in the ISS pin log"""
+    ev = ls.iss.pin_events
+    return sum(1 for a, b in zip(ev, ev[1:]) if ((a[3] >> bit) & 1) != ((b[3] >> bit) & 1))
+
+
+def usb_bad_stuff_wave(lead=300):
+    """[0xFF, 0x00] with the stuffed transition removed (a bit-stuff violation), then SE0 + J."""
+    lv, st = U.encode_levels([0xFF, 0x00])
+    lv[st[0]] = lv[st[0] - 1]
+    dp, dm = [0] * lead, [1] * lead
+    for l in lv:
+        dp += [l] * 33
+        dm += [1 - l] * 33
+    dp += [0] * 100
+    dm += [0] * 50 + [1] * 50
+    return dp, dm
+
+
+def usb_glitch(dp, dm, seed, n=6, lead=300):
+    rng = random.Random(seed)
+    dp, dm = list(dp), list(dm)
+    for _ in range(n):
+        pos, w = rng.randrange(lead // 2, len(dp) - 5), rng.randint(1, 3)
+        arr = dp if rng.randrange(2) else dm
+        for k in range(pos, pos + w):
+            arr[k] ^= 1
+    return dp, dm
+
+
+def scn_usb(name, dp, dm, expect=None, good=None, bad=None, usb_en=True, extra=None, cycles=None):
+    """usb_rx.asm on the core with the bit slicer connected (usb_en). Lockstep against the ISS
+    (model of the integration) every cycle; expect = bytes the host must receive, good = number of
+    packet-end toggles on uo6, bad = number of error toggles on uo5."""
+    def check(ls):
+        assert not ls.iss.illegal
+        if expect is not None:
+            assert ls.rx_got == expect, (ls.rx_got, expect)
+        if good is not None:
+            assert usb_toggles(ls, 6) == good, usb_toggles(ls, 6)
+        if bad is not None:
+            assert usb_toggles(ls, 5) == bad, usb_toggles(ls, 5)
+    return Scenario("usb_" + name, pad512(example("usb_rx.asm")), W.BusWorld([UsbSource(dp, dm)]),
+                    DefaultPolicy(extra=extra), cycles or (len(dp) + 400), check, usb_en=usb_en)
+
+
+def scn_usb_packets(name, kind, ppm=0, jit=0, skew=0, seed=1):
+    pk = usb_pkts(kind)
+    dp, dm = U.waveform(pk, ppm=ppm, jitter=jit, skew=skew, seed=seed)
+    return scn_usb(name, dp, dm, expect=[b for p in pk for b in p], good=len(pk), bad=0)
+
+
+def scn_usb_stuff_error():
+    bad_dp, bad_dm = usb_bad_stuff_wave()
+    good = U.waveform([U.token("SETUP", 0, 0)], lead=300)
+    dp, dm = bad_dp + good[0], bad_dm + good[1]
+    return scn_usb("stuff_error", dp, dm, expect=U.token("SETUP", 0, 0), good=2, bad=1)
+
+
+def scn_usb_glitch(seed):
+    dp, dm = U.waveform(usb_pkts(0), lead=300, ppm=(-1) ** seed * 8000, jitter=1, seed=seed)
+    dp, dm = usb_glitch(dp, dm, seed)
+    return scn_usb("glitch_%d" % seed, dp, dm)           # lockstep equality only
+
+
+def scn_usb_enable_midrun():
+    p1, p2 = U.token("SETUP", 0, 0), [U.pid_byte(U.PID["ACK"])]
+    w1 = U.waveform([p1], lead=300)
+    w2 = U.waveform([p2], lead=300)
+    dp, dm = w1[0] + w2[0], w1[1] + w2[1]
+    t_on = len(w1[0]) + 150                              # bus idle between the two packets
+
+    def extra(ls, S):
+        return {"usb_en": 1} if ls.wk == t_on else None
+    return scn_usb("enable_midrun", dp, dm, expect=p2, good=1, bad=0, usb_en=False, extra=extra)
+
+
+def scn_usb_disabled_passthrough():
+    """usb_en = 0: the program sees the physical ui_in[7:4] (here square waves) exactly like the ISS."""
+    def ui(k):
+        return 0xF0 & ((0x10 if (k // 37) % 2 else 0) | (0x20 if (k // 11) % 2 else 0) |
+                       (0x40 if (k // 53) % 3 == 0 else 0) | (0x80 if (k // 29) % 2 else 0))
+
+    def check(ls):
+        assert not ls.iss.illegal and len(ls.iss.commits) > 200
+    return Scenario("usb_disabled_passthrough", pad512(example("usb_rx.asm")),
+                    UiWorld(ui_fn=ui), DefaultPolicy(), 3000, check, usb_en=False)
+
+
+def usb():
+    return [
+        scn_usb_packets("clean", 0),
+        scn_usb_packets("slow_jitter", 1, ppm=15000, jit=2, skew=3, seed=3),
+        scn_usb_packets("fast_skew", 0, ppm=-15000, jit=1, skew=2, seed=5),
+        scn_usb_stuff_error(),
+        scn_usb_glitch(1), scn_usb_glitch(2), scn_usb_glitch(3),
+        scn_usb_enable_midrun(),
+        scn_usb_disabled_passthrough(),
+    ]
 
 
 # ------------------------------------------------------------------ registry

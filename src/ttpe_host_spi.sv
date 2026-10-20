@@ -36,6 +36,9 @@
 //                            read returned 0), [1] rejected command (unmapped address or
 //                            wrong direction), [2] TX_PUSH byte dropped because the TX FIFO
 //                            was full
+//   0x0B R/W  MODE       [0] usb_en: connects the low-speed USB bit slicer (ttpe_usb_rx) to the
+//                        virtual pins ui4..ui7 (docs/USB_LS_RX.md). Reset value 0; cleared by the
+//                        chip reset only (not by CTRL.core_reset). Bits [7:1] read 0, writes ignored.
 //   0x10 W    TX_PUSH    stream: each payload byte is pushed into the TX FIFO (HPULL source)
 //   0x11 R    RX_POP     stream: each payload byte is the head of the RX FIFO (HPUSH
 //                        destination); 0x00 and no pop if the FIFO is empty
@@ -86,6 +89,7 @@ module ttpe_host_spi (
     output wire [8:0]   host_pc_val,
     output wire         host_halt,
     output wire         host_core_reset,
+    output wire         usb_en,           // MODE[0]
 
     // core FIFO ports
     output wire         tx_push,
@@ -119,6 +123,7 @@ module ttpe_host_spi (
     localparam [6:0] R_SA_LO   = 7'h08;
     localparam [6:0] R_SA_HI   = 7'h09;
     localparam [6:0] R_ERR     = 7'h0A;
+    localparam [6:0] R_MODE    = 7'h0B;
     localparam [6:0] R_TX_PUSH = 7'h10;
     localparam [6:0] R_RX_POP  = 7'h11;
     localparam [6:0] R_SRAM    = 7'h12;
@@ -166,6 +171,7 @@ module ttpe_host_spi (
     logic [8:0]  pc_q, sa_q, ha_q;
     logic [7:0]  scratch_q;
     logic [2:0]  err_q;
+    logic        mode_usb_q;
 
     logic [31:0] rd_word_q, wdata_q;
     logic        req_q, req_we_q;
@@ -182,12 +188,12 @@ module ttpe_host_spi (
                          (cmd_addr == R_RX_OVR)  || (cmd_addr == R_SCRATCH) ||
                          (cmd_addr == R_SA_LO)   || (cmd_addr == R_SA_HI)   ||
                          (cmd_addr == R_ERR)     || (cmd_addr == R_RX_POP)  ||
-                         (cmd_addr == R_SRAM);
+                         (cmd_addr == R_SRAM)    || (cmd_addr == R_MODE);
     wire        wr_sup = (cmd_addr == R_CTRL)    || (cmd_addr == R_PC_LO)   ||
                          (cmd_addr == R_PC_HI)   || (cmd_addr == R_SCRATCH) ||
                          (cmd_addr == R_SA_LO)   || (cmd_addr == R_SA_HI)   ||
                          (cmd_addr == R_ERR)     || (cmd_addr == R_TX_PUSH) ||
-                         (cmd_addr == R_SRAM);
+                         (cmd_addr == R_SRAM)    || (cmd_addr == R_MODE);
     wire        cmd_ok   = cmd_rw ? rd_sup : wr_sup;
 
     wire dec_cmd  = rx_valid & ~have_cmd_q & ~cs_fall;
@@ -219,6 +225,7 @@ module ttpe_host_spi (
     assign host_halt     = ctrl_wr & rx_byte[4];
     assign host_core_reset = ctrl_wr & rx_byte[5];
     assign host_pc_val   = pc_q;
+    assign usb_en        = mode_usb_q;
 
     assign tx_push  = dec_data & (addr_q == R_TX_PUSH);
     assign tx_wdata = rx_byte;
@@ -239,6 +246,7 @@ module ttpe_host_spi (
     wire [7:0] sa_lo_w      = sa_q[7:0];
     wire [7:0] sa_hi_w      = {7'b0, sa_q[8]};
     wire [7:0] err_w        = {5'b0, err_q};
+    wire [7:0] mode_w       = {7'b0, mode_usb_q};
     wire [7:0] cnt_w        = {rx_count, tx_count};
     wire [7:0] rxpop_w      = rx_empty ? 8'h00 : rx_rdata;
     wire [4:0] sh_w         = {widx_q, 3'b000};
@@ -258,6 +266,7 @@ module ttpe_host_spi (
             R_SA_LO:    rd_mux = sa_lo_w;
             R_SA_HI:    rd_mux = sa_hi_w;
             R_ERR:      rd_mux = err_w;
+            R_MODE:     rd_mux = mode_w;
             R_RX_POP:   rd_mux = rxpop_w;
             R_SRAM:     rd_mux = sram_byte_w;
             default:    rd_mux = 8'h00;
@@ -284,6 +293,7 @@ module ttpe_host_spi (
             ha_q       <= 9'd0;
             scratch_q  <= 8'd0;
             err_q      <= 3'd0;
+            mode_usb_q <= 1'b0;
             rd_word_q  <= 32'd0;
             wdata_q    <= 32'd0;
             req_q      <= 1'b0;
@@ -345,6 +355,7 @@ module ttpe_host_spi (
                         R_PC_LO:   pc_q[7:0]      <= rx_byte;
                         R_PC_HI:   pc_q[8]        <= rx_byte[0];
                         R_SCRATCH: scratch_q      <= rx_byte;
+                        R_MODE:    mode_usb_q     <= rx_byte[0];
                         R_SA_LO:   sa_q[7:0]      <= rx_byte;
                         R_SA_HI:   sa_q[8]        <= rx_byte[0];
                         R_SRAM: begin

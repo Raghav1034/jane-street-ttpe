@@ -77,6 +77,10 @@ class Ttpe:
         self.s1 = 0
         self.s2 = 0
         self.s2_prev = 0
+        # optional low-speed USB bit slicer (docs/USB_LS_RX.md, src/ttpe_usb_rx.sv). usb_en = False
+        # (the reset value of host register MODE[0]) leaves the engine exactly as in ISA v0.2.
+        self.usb_en = False
+        self.usb = None
 
         # observability (used by tests and later as RTL reference)
         self.commits = []           # (commit_cycle, pc, word)
@@ -272,9 +276,22 @@ class Ttpe:
             self.fetch_pc = (self.fetch_pc + 1) & 0x1FF
             self.fetch_valid_at = k + isa.FETCH_LATENCY
 
+        # USB bit slicer: computed from this cycle's s2 / s2_prev (= s3), loaded into s2[15:12]
+        usb_y = None
+        if self.usb_en or self.usb is not None:
+            if self.usb is None:
+                import usb_ls
+                self.usb = usb_ls.UsbRx()
+            t_, d_, s_, e_ = self.usb.step(self.usb_en, (self.s2 >> 6) & 1,
+                                           (self.s2_prev >> 6) & 1, (self.s2 >> 7) & 1)
+            if self.usb_en:
+                usb_y = t_ | (d_ << 1) | (s_ << 2) | (e_ << 3)
+
         # synchroniser update (end of cycle k)
         self.s2_prev = self.s2
         self.s2 = self.s1
+        if usb_y is not None:
+            self.s2 = (self.s2 & 0x0FFF) | (usb_y << 12)
         self.s1 = (pad_uio & 0xFF) | ((pad_ui & 0xFF) << 8)
         self.cycle = k + 1
 

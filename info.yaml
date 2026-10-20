@@ -24,6 +24,7 @@ project:
     - "ttpe_fifo.sv"
     - "ttpe_sram_ctrl.sv"
     - "ttpe_mem_subsys.sv"
+    - "ttpe_usb_rx.sv"
     - "ttpe_exec.sv"
     - "ttpe_core.sv"
     - "ttpe_spi_phy.sv"
