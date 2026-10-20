@@ -67,6 +67,9 @@ module ttpe_exec (
     output wire         rx_push,
     output wire [7:0]   rx_wdata,
 
+    // optional USB low-speed bit slicer (docs/USB_LS_RX.md); 0 = no effect on any program
+    input  wire         usb_en,
+
     // run control / status
     input  wire         resume,          // 1-cycle pulse; only honoured while halted
     input  wire         halt_req,        // 1-cycle pulse: soft halt (stops after this cycle)
@@ -142,12 +145,28 @@ module ttpe_exec (
     //--------------------------------------------------------------------------
     wire [15:0] s2, s2p;
 
+    wire [3:0] usb_d;
+
     ttpe_input_sync #(.W(16)) u_sync (
         .clk         (clk),
         .rst_n       (rst_n),
         .pad_in      (pad_in),
+        .usb_en      (usb_en),
+        .usb_d       (usb_d),
         .sync_q      (s2),
         .sync_prev_q (s2p)
+    );
+
+    // Low-speed USB bit slicer: D+ = uio6, D- = uio7 (synchronised). Its next-value outputs are
+    // loaded into s2[15:12] (ui_in[7:4], source pins 12..15) while usb_en = 1.
+    ttpe_usb_rx u_usb (
+        .clk       (clk),
+        .rst_n     (rst_n),
+        .en        (usb_en),
+        .dp_q      (s2 [6]),
+        .dp_prev_q (s2p[6]),
+        .dm_q      (s2 [7]),
+        .usb_d     (usb_d)
     );
 
     wire src_b  = s2 [cur_a_q];

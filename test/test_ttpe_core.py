@@ -39,6 +39,7 @@ INPUTS = dict(
     host_req=0, host_we=0, host_addr=0, host_wdata=0, host_wstrb=0xF,
     host_resume=0, host_pc_load=0, host_pc_val=0, host_halt=0, host_core_reset=0,
     tx_push=0, tx_wdata=0, tx_fifo_flush=0, rx_pop=0, rx_fifo_flush=0,
+    usb_en=0,
 )
 
 
@@ -124,7 +125,8 @@ class CocoDut:
 async def run_scenario(dut, sc):
     await reset(dut)
     await host_write_image(dut, sc.words)
-    ls = Lockstep(CocoDut(dut), sc.words, sc.world, sc.policy, sc.name)
+    ls = Lockstep(CocoDut(dut), sc.words, sc.world, sc.policy, sc.name,
+                  usb_en=getattr(sc, "usb_en", False))
     await ls.run(sc.cycles)
     ls.finish()
     if sc.check:
@@ -228,6 +230,9 @@ for _i, _sc in enumerate(scn.directed()):
 
 for _i, _sc in enumerate(scn.examples()):
     _register("test_example_%s" % _sc.name, lambda i=_i: scn.examples()[i])
+
+for _i, _sc in enumerate(scn.usb()):
+    _register("test_%s" % _sc.name, lambda i=_i: scn.usb()[i])
 
 for _i in range(12):
     _register("test_fuzz_%d" % _i, lambda i=_i: scn.scn_fuzz(i))

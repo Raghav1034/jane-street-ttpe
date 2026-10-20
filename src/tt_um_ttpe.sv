@@ -46,6 +46,7 @@ module tt_um_ttpe (
     wire [31:0] host_wdata, host_rdata;
     wire [3:0]  host_wstrb;
     wire        host_resume, host_pc_load, host_halt, host_core_reset;
+    wire        usb_en;
     wire [8:0]  host_pc_val;
     wire        tx_push, tx_fifo_flush, rx_pop, rx_fifo_flush;
     wire [7:0]  tx_wdata, rx_rdata, rx_overrun_cnt;
@@ -61,6 +62,7 @@ module tt_um_ttpe (
         .uio_out       (uio_out),
         .uio_oe        (uio_oe),
         .uo_out        (core_uo),
+        .usb_en        (usb_en),
         .host_req      (host_req),
         .host_we       (host_we),
         .host_addr     (host_addr),
@@ -121,6 +123,7 @@ module tt_um_ttpe (
         .host_pc_val    (host_pc_val),
         .host_halt      (host_halt),
         .host_core_reset(host_core_reset),
+        .usb_en         (usb_en),
         .tx_push        (tx_push),
         .tx_wdata       (tx_wdata),
         .tx_fifo_flush  (tx_fifo_flush),

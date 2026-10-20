@@ -145,7 +145,7 @@ class DefaultPolicy:
 
 
 class Lockstep:
-    def __init__(self, dut, words, world, policy=None, name=""):
+    def __init__(self, dut, words, world, policy=None, name="", usb_en=False):
         import ttpe_iss as iss_mod
         self.d = dut
         self.world = world
@@ -156,6 +156,11 @@ class Lockstep:
             words += [isa.encode(isa.OPCODES["HALT"])] * (isa.PROG_WORDS - len(words))
         self.iss = iss_mod.Ttpe(words)
         self.iss.halted = True              # reset state: halted until host_resume
+        # USB bit slicer enable (core input usb_en = host register MODE[0]). The policy may change it
+        # with a {"usb_en": 0/1} action; the new value applies in the same cycle on the RTL and the ISS.
+        # Limitation: the ISS only advances while the core runs, the RTL primitive free-runs, so only
+        # change usb_en while the core is running and the bus is idle.
+        self.usb_en = bool(usb_en)
         self.fixed = FixedWorld()
         self.k = 0                          # RTL cycle counter since the first lockstep cycle
         self.wk = 0                         # world time (see module doc)
@@ -229,6 +234,8 @@ class Lockstep:
             pad_uio, pad_ui = 0xFF, getattr(self.world, "ui", 0xFF)
         self.fixed.uio, self.fixed.ui = pad_uio & 0xFF, pad_ui & 0xFF
 
+        if "usb_en" in act:
+            self.usb_en = bool(act["usb_en"])
         ctl_ok = bool(S["halted"]) and bool(S["mem_free"])
         resume = bool(act.get("resume"))
         pc_ld = act.get("pc_load")
@@ -243,6 +250,7 @@ class Lockstep:
             tx_fifo_flush=int(bool(act.get("tx_flush"))),
             rx_pop=int(bool(act.get("rx_pop"))),
             rx_fifo_flush=int(bool(act.get("rx_flush"))),
+            usb_en=int(self.usb_en),
         )
         d.drive(inp)
         await d.mid_cycle()
@@ -263,6 +271,7 @@ class Lockstep:
 
         # ---- ISS step
         iss_cycle = t.cycle
+        t.usb_en = self.usb_en
         stepped = not t.halted
         if stepped:
             na, nc = len(t.accepts), len(t.commits)

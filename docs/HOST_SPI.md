@@ -16,7 +16,7 @@ and drains the RX FIFO (data from `HPUSH`). The ISA is untouched (v0.2 frozen).
 | `ui_in[0]` | in | **SPI SCK** (also synchroniser source pin 8) |
 | `ui_in[1]` | in | **SPI MOSI** (also source pin 9) |
 | `ui_in[2]` | in | **SPI CS_N** (also source pin 10) |
-| `ui_in[7:3]` | in | program inputs (source pins 11..15) |
+| `ui_in[7:3]` | in | program inputs (source pins 11..15). With `MODE[0] = 1` (register 0x0B) source pins 12..15 (`ui_in[7:4]`) read the low-speed USB bit slicer instead of the pads: ui4 TICK, ui5 DATA, ui6 STOP, ui7 ERR (docs/USB_LS_RX.md); D+ / D- are uio6 / uio7 |
 | `uo_out[0]` | out | **SPI MISO while CS_N is low** (synchronised), otherwise the program's sink pin 8 (`uo0`) |
 | `uo_out[7:1]` | out | program outputs (sink pins 9..15) |
 
@@ -94,6 +94,7 @@ poll `STATUS` after a program-initiated `HALT` instead of assuming it.
 | 0x08 | SADDR_LO | R/W | SRAM word address, bits 7:0 |
 | 0x09 | SADDR_HI | R/W | bit 0 = word address bit 8 |
 | 0x0A | ERR | R/W1C | bit 0 SRAM window used while the core runs, bit 1 rejected command, bit 2 TX_PUSH byte dropped (TX FIFO full). Write 1 to clear |
+| 0x0B | MODE | R/W | bit 0 `usb_en`: connect the USB low-speed bit slicer to source pins 12..15. Bits 7:1 read 0, writes ignored. Reset 0; cleared by the chip reset only, not by `CTRL.core_reset`. Change it only while the USB bus is idle |
 | 0x10 | TX_PUSH | W | stream: every payload byte is pushed into the TX FIFO (source of `HPULL`) |
 | 0x11 | RX_POP | R | stream: every payload byte is the RX FIFO head (destination of `HPUSH`); `0x00` and no pop when empty |
 | 0x12 | SRAM | R/W | stream window onto the SRAM at `SADDR` (32 bit words, **LSB byte first**, `SADDR` auto-increments after every 4th byte, 9 bit wrap) |

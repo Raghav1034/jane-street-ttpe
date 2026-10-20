@@ -36,11 +36,12 @@ import ttpe_iss as iss_mod                      # noqa: E402
 import ttpe_isa as isa                          # noqa: E402
 import ttpe_scenarios as scn                    # noqa: E402
 import ttpe_world as W                          # noqa: E402
+import usb_ls as U                              # noqa: E402
 from ttpe_lockstep import FixedWorld            # noqa: E402
 
 # ---------------------------------------------------------------- register map
 R_ID, R_STATUS, R_CTRL, R_PC_LO, R_PC_HI, R_FIFO_CNT, R_RX_OVR, R_SCRATCH = 0, 1, 2, 3, 4, 5, 6, 7
-R_SA_LO, R_SA_HI, R_ERR = 8, 9, 0x0A
+R_SA_LO, R_SA_HI, R_ERR, R_MODE = 8, 9, 0x0A, 0x0B
 R_TX_PUSH, R_RX_POP, R_SRAM = 0x10, 0x11, 0x12
 ID_VALUE = 0x54
 
@@ -70,9 +71,10 @@ class TopError(AssertionError):
 class Monitor:
     """Cycle-exact pin comparison of the DUT against the ISS."""
 
-    def __init__(self, h, words, world, host_tx=(), window=1000, name="prog"):
+    def __init__(self, h, words, world, host_tx=(), window=1000, name="prog", usb_en=False):
         self.h, self.world, self.window, self.name = h, world, window, name
         self.iss = iss_mod.Ttpe(scn.pad512(words), host_tx=list(host_tx))
+        self.iss.usb_en = usb_en            # MODE[0] as written by the host before the start
         self.S = None
         self.fixed = FixedWorld()
         self.compared = 0
@@ -592,14 +594,17 @@ async def t_async_reset(h):
     assert await h.read_words(len(words)) == words
 
 
-async def _example_run(h, name, words, world, tx, window, post, rx_drain=False, verify=False):
+async def _example_run(h, name, words, world, tx, window, post, rx_drain=False, verify=False,
+                       usb=False):
     await h.reset()
     await h.load_words(trim(words))
+    if usb:
+        await h.wr(R_MODE, 1)               # connect the USB bit slicer (docs/USB_LS_RX.md)
     if verify:
         assert await h.read_words(len(trim(words))) == trim(words), "readback after load"
     if tx:
         await h.push_tx(tx)
-    mon = Monitor(h, words, world, host_tx=list(tx), window=window, name=name)
+    mon = Monitor(h, words, world, host_tx=list(tx), window=window, name=name, usb_en=usb)
     h.mon = mon
     await h.start(0, mon)
     got = []
@@ -680,6 +685,55 @@ async def t_example_i2c_master(h):
         assert slave.starts == 2 and slave.stops == 2
         assert await h.drain_rx() == [0xC1, 0x3E, 0x7F]
     await _example_run(h, "i2c_master", sc.words, W.BusWorld([slave]), tx, sc.cycles, post)
+
+
+async def t_usb_mode_register(h):
+    """MODE register 0x0B: reset value, bit 0 only, untouched by CTRL, cleared by the chip reset."""
+    await h.reset()
+    assert await h.rd1(R_MODE) == 0
+    await h.wr(R_MODE, 1)
+    assert await h.rd(R_MODE, 3) == [1, 1, 1]
+    await h.wr(R_MODE, 0xFE)                              # only bit 0 exists
+    assert await h.rd1(R_MODE) == 0
+    await h.wr(R_MODE, 0xFF)
+    assert await h.rd1(R_MODE) == 1
+    assert await h.rd1(R_ERR) == 0                        # MODE is a mapped register
+    await h.wr(R_CTRL, CTRL_CORE_RESET | CTRL_TX_FLUSH | CTRL_RX_FLUSH | CTRL_HALT)
+    assert await h.rd1(R_MODE) == 1                       # not cleared by core_reset / halt / flush
+    assert await h.rd(0x0C, 1) == [0]                     # the next address is still unmapped
+    assert await h.rd1(R_ERR) == ERR_BAD_CMD
+    await h.wr(R_ERR, 0x07)
+    assert await h.rd1(R_ID) == ID_VALUE and await h.rd1(R_SCRATCH) == 0
+    h.a.assert_reset()
+    await h.idle(4)
+    h.a.release_reset()
+    await h.idle(6)
+    assert await h.rd1(R_MODE) == 0                       # chip reset clears it
+
+
+async def t_usb_rx_e2e(h):
+    """Low-speed USB receive through the chip pins: MODE[0] = 1 over SPI, usb_rx.asm, packets on
+    uio6 (D+) / uio7 (D-); bytes drained over SPI while the program runs; pins cycle exact vs the ISS."""
+    pk = scn.usb_pkts(0)
+    dp, dm = U.waveform(pk, ppm=-10000, jitter=1, skew=2, seed=7)
+    expect = [b for p in pk for b in p]
+    world = W.BusWorld([scn.UsbSource(dp, dm)])
+
+    async def post(mon, got):
+        assert got == expect, (got, expect)
+        assert not (await h.status()) & ST_ILLEGAL
+        assert await h.rd1(R_RX_OVR) == 0
+    await _example_run(h, "usb_rx", scn.example("usb_rx.asm"), world, [], len(dp) + 400, post,
+                       rx_drain=True, usb=True)
+
+
+async def t_usb_disabled_passthrough(h):
+    """MODE[0] = 0 (reset value): the program reads the physical ui_in[7:4] exactly as before."""
+    sc = scn.scn_usb_disabled_passthrough()
+
+    async def post(mon, got):
+        assert not (await h.status()) & ST_ILLEGAL
+    await _example_run(h, "usb_off", sc.words, sc.world, [], 3000, post)
 
 
 async def t_spi_during_run(h):

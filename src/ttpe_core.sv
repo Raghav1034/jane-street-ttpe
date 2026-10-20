@@ -77,6 +77,9 @@ module ttpe_core #(
     output wire         host_rvalid,
     output wire [31:0]  host_rdata,
 
+    // optional USB low-speed bit slicer enable (host register MODE[0]); 0 = no effect
+    input  wire         usb_en,
+
     // host run control
     input  wire         host_resume,
     input  wire         host_pc_load,
@@ -219,6 +222,7 @@ module ttpe_core #(
         .instr_accept      (instr_accept),
         .pc_load           (x_pc_load),
         .pc_load_val       (x_pc_load_val),
+        .usb_en            (usb_en),
         .tx_empty          (tx_empty),
         .tx_rdata          (x_tx_rdata),
         .tx_pop            (x_tx_pop),
