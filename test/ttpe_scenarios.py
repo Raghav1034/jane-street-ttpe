@@ -597,6 +597,20 @@ def scn_i2c_write(tl, th, cycles):
     return scn_i2c(tl, th, [0xA0, 2, 0x11, 0x22], slave, cycles, check, "wr_%d_%d" % (tl, th))
 
 
+def scn_i2c_rstart(tl, th, cycles, reg=0x05, n=3):
+    """Register read: S A+W reg Sr A+R n bytes P (n[7] = 1 on the write, no STOP in between)."""
+    mem = [(0x30 + 7 * i) & 0xFF for i in range(256)]
+    slave = W.I2cRegSlave(0x50, mem=mem)
+
+    def check(ls):
+        assert slave.events == ["S", "Sr", "P"], slave.events
+        assert slave.written == [[reg], []], slave.written
+        assert ls.rx_got == mem[reg:reg + n], ls.rx_got
+        assert not ls.iss.uo_out & 0x80
+    return scn_i2c(tl, th, [0xA0, 0x81, reg, 0xA1, n], slave, cycles, check,
+                   "rstart_%d_%d" % (tl, th))
+
+
 def scn_i2c_nack(tl, th):
     slave = W.I2cSlave(0x50)
 
@@ -785,6 +799,42 @@ def scn_usb_disabled_passthrough():
                     UiWorld(ui_fn=ui), DefaultPolicy(), 3000, check, usb_en=False)
 
 
+def scn_usb_tx(name, packets):
+    """usb_tx.asm in lockstep: the pad waveform produced by the engine (ISS and RTL agree every cycle)
+    must equal the reference waveform of usb_ls.tx_expected (SYNC, NRZI, stuffing, 33/34-cycle cells,
+    SE0 66 cycles, J 33 cycles).  No primitive needed (usb_en stays 0)."""
+    world = W.UsbTxBus()
+    host = []
+    for p in packets:
+        host += [len(p)] + list(p)
+    cycles = 400 + sum(len(U.tx_expected(p)[0]) + 400 for p in packets)
+
+    def check(ls):
+        dp, dm = world.levels(6), world.levels(7)
+        pos = 0
+        for p in packets:
+            ep, em = U.tx_expected(p)
+            e0 = dp.index(1, pos)
+            assert dp[e0:e0 + len(ep)] == ep, "D+ waveform differs"
+            assert dm[e0:e0 + len(em)] == em, "D- waveform differs"
+            pos = e0 + len(ep)
+        assert not ls.iss.illegal
+    return Scenario("usb_tx_" + name, pad512(example("usb_tx.asm")), world,
+                    DefaultPolicy(tx_bytes=host), cycles, check)
+
+
+def usb_tx():
+    ack = [U.pid_byte(U.PID["ACK"])]
+    nak = [U.pid_byte(U.PID["NAK"])]
+    setup = U.token("SETUP", 0, 0)
+    data1 = U.data_packet("DATA1", [0xFF] * 8)        # worst-case bit stuffing
+    return [
+        scn_usb_tx("ack_nak", [ack, nak]),
+        scn_usb_tx("setup", [setup]),
+        scn_usb_tx("data1_ff", [data1]),
+    ]
+
+
 def usb():
     return [
         scn_usb_packets("clean", 0),
@@ -823,6 +873,8 @@ def examples():
         scn_spi(0, 0, 12, [0xFF, 0x00, 0x81], [0x18, 0xE7, 0xAA], tag="_min"),
         scn_i2c_write_read(75, 50, 11000),
         scn_i2c_write(250, 250, 18000),
+        scn_i2c_rstart(75, 50, 9500),
+        scn_i2c_rstart(250, 250, 32000),
         scn_i2c_nack(75, 50),
         scn_i2c_stretch(),
     ]

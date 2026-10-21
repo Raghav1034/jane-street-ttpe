@@ -320,12 +320,115 @@ class I2cMaster(unittest.TestCase):
         self.assertEqual((slave.starts, slave.stops), (2, 2))
 
 
+class I2cRepeatedStart(unittest.TestCase):
+    """n[7] = 1 ends a transaction without STOP; the next command starts with a repeated START."""
+
+    MEM = [(0x30 + 7 * i) & 0xFF for i in range(256)]
+
+    def run_rs(self, host_tx, tl, th, cycles, slave=None):
+        slave = slave or W.I2cRegSlave(0x50, mem=self.MEM)
+        t = iss.Ttpe(load("i2c_master.asm", TL=tl, TH=th).image(), host_tx=host_tx)
+        w = W.BusWorld([slave])
+        t.run_cycles(w, cycles)
+        return t, slave, w
+
+    @staticmethod
+    def bus_starts(w):
+        """Cycles at which SDA falls while SCL is high (START or repeated START)."""
+        scl = w.levels(2)
+        return [c for c, lv in w.edges(3) if lv == 0 and scl[c] == 1]
+
+    def test_register_read_with_repeated_start_in_both_modes(self):
+        for tl, th, name, _, _ in CONFIGS:
+            with self.subTest(name):
+                reg, n = 0x05, 3
+                t, s, w = self.run_rs([0xA0, 0x81, reg, 0xA1, n], tl, th, 90 * (tl + th) + 4000)
+                self.assertEqual(s.events, ["S", "Sr", "P"])
+                self.assertEqual([b for _, b in t.rx], self.MEM[reg:reg + n])
+                self.assertEqual(s.written, [[reg], []])
+                self.assertEqual((s.starts, s.stops, s.starts_while_active), (2, 1, 1))
+                self.assertEqual(s.nacked_reads, 1)
+                self.assertEqual(t.uo_out & 0x80, 0)
+                self.assertFalse(t.illegal)
+
+    def test_repeated_start_timing(self):
+        for tl, th, name, tlow_min_ns, thigh_min_ns in CONFIGS:
+            with self.subTest(name):
+                t, s, w = self.run_rs([0xA0, 0x81, 0x05, 0xA1, 2], tl, th, 90 * (tl + th) + 4000)
+                scl_ed, sda_ed = w.edges(2), w.edges(3)
+                scl, sda = w.levels(2), w.levels(3)
+                st = self.bus_starts(w)
+                self.assertEqual(len(st), 2)
+                sr = st[1]
+                rise = max(c for c, lv in scl_ed if lv == 1 and c < sr)
+                fall_before = max(c for c, lv in scl_ed if lv == 0 and c < rise)
+                fall_after = min(c for c, lv in scl_ed if lv == 0 and c > sr)
+                self.assertGreaterEqual(rise - fall_before, tl, "SCL low before the Sr edge >= TL")
+                self.assertEqual(sr - rise, th, "tSU;STA = TH")
+                self.assertEqual(fall_after - sr, th, "tHD;STA = TH")
+                self.assertGreaterEqual((sr - rise) * CLK_NS, thigh_min_ns)
+                self.assertEqual(sda[rise], 1, "SDA released before SCL rises")
+                self.assertEqual(sda[rise - 1], 1)
+                # SDA changes with SCL high only at START, Sr and STOP
+                hi_edges = [(c, lv) for c, lv in sda_ed if scl[c] == 1]
+                self.assertEqual([lv for _, lv in hi_edges], [0, 0, 1])
+                self.assertEqual(hi_edges[0][0], st[0])
+                self.assertEqual(hi_edges[1][0], sr)
+
+    def test_lines_are_never_driven_high(self):
+        """Open-drain only: uio2/uio3 are driven low or released, never push-pull high."""
+        for tl, th, name, _, _ in CONFIGS:
+            with self.subTest(name):
+                t, s, w = self.run_rs([0xA0, 0x81, 0x05, 0xA1, 2], tl, th, 90 * (tl + th) + 4000)
+                for _, oe, out, _ in t.pin_events:
+                    self.assertEqual(oe & out & 0x0C, 0)
+
+    def test_bus_is_held_until_the_next_command(self):
+        tl, th = 75, 50
+        t, s, w = self.run_rs([0xA0, 0x81, 0x05, (20000, 0xA1), (20000, 1)], tl, th, 30000)
+        self.assertEqual(s.events, ["S", "Sr", "P"])
+        scl, sda = w.levels(2), w.levels(3)
+        self.assertEqual(set(scl[8000:19000]), {0}, "SCL held low while waiting for the host")
+        self.assertEqual(set(sda[8000:19000]), {1}, "SDA released")
+        self.assertEqual([b for _, b in t.rx], [self.MEM[0x05]])
+
+    def test_chained_sr_transactions(self):
+        tl, th = 75, 50
+        # S A+W ptr=0x10 | Sr A+W 0x20 (ptr), 0x77 -> mem[0x20] | Sr A+R 1 byte | P
+        t, s, w = self.run_rs([0xA0, 0x81, 0x10, 0xA0, 0x82, 0x20, 0x77, 0xA1, 1],
+                              tl, th, 140 * (tl + th) + 4000)
+        self.assertEqual(s.events, ["S", "Sr", "Sr", "P"])
+        self.assertEqual(s.mem[0x20], 0x77)
+        self.assertEqual([b for _, b in t.rx], [self.MEM[0x21]])
+        # read, held | Sr read, held | Sr read | P  (pointer keeps running: 4 bytes in all)
+        t, s, w = self.run_rs([0xA1, 0x82, 0xA1, 0x81, 0xA1, 1], tl, th, 140 * (tl + th) + 4000)
+        self.assertEqual(s.events, ["S", "Sr", "Sr", "P"])
+        self.assertEqual([b for _, b in t.rx], self.MEM[0:4])
+
+    def test_count_bits_6_0_and_stop_default_unchanged(self):
+        tl, th = 75, 50
+        # n = 0x83: 3 bytes with Sr; the next command ends the transaction with STOP (n = 1)
+        t, s, w = self.run_rs([0xA1, 0x83, 0xA1, 1], tl, th, 70 * (tl + th) + 4000)
+        self.assertEqual(s.events, ["S", "Sr", "P"])
+        self.assertEqual([b for _, b in t.rx], self.MEM[0:3] + [self.MEM[3]])
+
+    def test_address_nack_after_repeated_start_releases_the_bus(self):
+        tl, th = 75, 50
+        t, s, w = self.run_rs([0xA0, 0x81, 0x05, 0xA3], tl, th, 90 * (tl + th) + 4000)   # no n byte: it would be left in the FIFO
+        self.assertEqual(s.events, ["S", "Sr", "P"])
+        self.assertEqual(s.addr_seen[-1], (0x51, 1, False))
+        self.assertEqual(t.uo_out & 0x80, 0x80, "error flag")
+        self.assertEqual(set(w.levels(2)[-100:]), {1})
+        self.assertEqual(set(w.levels(3)[-100:]), {1})
+
+
 # ====================================================================== all examples
 class AllExamples(unittest.TestCase):
     def test_program_sizes(self):
         sizes = {fn: sum(load(fn).used) for fn in sorted(os.listdir(EX_DIR)) if fn.endswith(".asm")}
         self.assertEqual(set(sizes), {"uart_tx.asm", "uart_rx.asm", "spi_master.asm", "i2c_master.asm",
-                                    "usb_rx.asm"})   # usb_rx: needs the proposed ttpe_usb_rx primitive
+                                    "usb_rx.asm",    # usb_rx: needs the ttpe_usb_rx primitive (MODE[0] = 1)
+                                    "usb_tx.asm"})   # usb_tx: software only, D+ = uio6, D- = uio7
         for fn, n in sizes.items():
             self.assertLess(n, 128, "%s uses %d words" % (fn, n))
 

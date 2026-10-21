@@ -287,3 +287,57 @@ class I2cSlave:
             low |= 1 << self.scl
             self.stretch_left -= 1
         return low
+
+
+class I2cRegSlave(I2cSlave):
+    """I2C slave with a register file and pointer (typical sensor/EEPROM behaviour):
+    the first byte written after the address sets the pointer, further written bytes are
+    stored at ptr++, reads return mem[ptr++].  A repeated START does not reset the pointer,
+    so [S A+W REG Sr A+R data P] reads from REG.  .events logs 'S', 'P' in bus order and
+    .starts_while_active counts a START seen before a STOP (= repeated START)."""
+
+    def __init__(self, addr, mem=None, **kw):
+        super().__init__(addr, **kw)
+        self.mem = list(mem) if mem is not None else list(range(256))
+        self.ptr = 0
+        self.events = []
+        self.starts_while_active = 0
+        self._bus_active = False
+
+    def _load_read(self):
+        self.cur = self.mem[self.ptr % len(self.mem)]
+        self.ptr += 1
+        self.rd_pos += 1
+
+    def step(self, k, pad_prev):
+        s0, p0, w0 = self.starts, self.stops, sum(len(x) for x in self.written)
+        low = super().step(k, pad_prev)
+        if self.starts != s0:
+            self.events.append("Sr" if self._bus_active else "S")
+            if self._bus_active:
+                self.starts_while_active += 1
+            self._bus_active = True
+        if self.stops != p0:
+            self.events.append("P")
+            self._bus_active = False
+        if sum(len(x) for x in self.written) != w0:
+            b, n = self.written[-1][-1], len(self.written[-1])
+            if n == 1:
+                self.ptr = b
+            else:
+                self.mem[self.ptr % len(self.mem)] = b
+                self.ptr += 1
+        return low
+
+
+class UsbTxBus(BusWorld):
+    """Low-speed USB bus seen by a transmitter on D+ = uio6, D- = uio7: D- has the device pull-up
+    (released reads 1), D+ has the host pull-down (released reads 0), so a released bus is J.
+    pad_log / levels() / edges() give the per-cycle line levels."""
+
+    def pads(self, k, uio_oe, uio_out, uo_out):
+        pad, ui = super().pads(k, uio_oe, uio_out, uo_out)
+        pad = (pad & ~0x40 & 0xFF) | (uio_oe & uio_out & 0x40)
+        self.last_pad = pad
+        self.pad_log[-1] = pad
+        return pad, ui

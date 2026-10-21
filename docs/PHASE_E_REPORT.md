@@ -2,19 +2,20 @@
 
 Author's note on evidence: "RTL sim" below means Icarus 12 + cocotb 2.1 results **reported by the user** (79 tests:
 8 `TARGET=usb` + 55 `TARGET=core` + 16 `TARGET=top`; the author's independent count of the registered tests is also 79, so
-no new test was silently skipped). The author never ran Verilog. Nothing in this file is a synthesis, STA, layout or
-silicon result unless it says so.
+no new test was silently skipped). The author never ran Verilog. Update after the physical flow: GitHub Actions on `dev/protocol-continuation` (commit `ba2e07b`), as reported by the project author: `gds` (LibreLane 3.1.0.dev3, ihp-sg13cmos5l), `precheck` (DRC/LVS/antenna/manifest), `gl_test` (all 16 `test_ttpe_top` tests on the synthesized gate-level netlist, including `t_usb_rx_e2e`, `t_usb_mode_register`, `t_usb_disabled_passthrough`) and `viewer` all passed. The
+author of this file saw the CI summary and log excerpts, not the raw logs; numbers (area, WNS/TNS, congestion) are still to
+be compared with baseline `d8bffd4`. Nothing else in this file is a synthesis, STA, layout or silicon result.
 
 ## 0. Bottom line
 
-* The USB block is **simulation-verified against its own specification, which the same author wrote from memory**.
-  It has not touched synthesis, a real USB signal, or any independent USB implementation.
+* The USB block is **simulation- and gate-level-verified against its own specification, which the same author wrote
+  from memory**. It has not touched a real USB signal or any independent USB implementation.
 * Physical-design risk of the *block itself* looks small (about 30 flops, no macro interface, no floorplan change).
   That is an engineering estimate, not a measurement; the flow decides.
 * The real silicon risks are **outside the RTL**: electrical interface, signalling conventions that no test could
   falsify, the 8-byte RX FIFO against a slow host, and the absence of any transmit path.
-* Recommendation: run the physical flow now (cheap, objective), compare against the last good baseline, and in parallel
-  replay one **real captured low-speed trace** through `TARGET=usb`. Do not call Phase D "fully verified" before that.
+* Recommendation (updated): the physical flow is green in CI. Next, compare its numbers with baseline `d8bffd4` and replay
+  one **real captured low-speed trace** through `TARGET=usb`. Do not call Phase D "fully verified" before that.
 
 ## 1. Physical safety audit
 
@@ -51,7 +52,11 @@ silicon result unless it says so.
 * `usb_en` is a same-clock flop output, no clock-domain crossing. Asynchronous reset flops follow the existing
   `rst_sync_n` scheme (recovery/removal checked by the same STA).
 
-### 1.4 Synthesis and lint exposure (unknown until the flow runs)
+### 1.4 Synthesis and lint exposure (flow has run; CI green, author-reported)
+
+Result: no latch inferred in `ttpe_usb_rx`; no new Verilator warning from it (the 38 warnings reported are in other
+files); `st_q` recoded to one-hot by Yosys; 721 cells for `tt_um_ttpe` after `OPT_MERGE` (before ABC mapping, so not an
+area figure); `gl_test` 16/16. The expectations below were written before the run.
 
 * `always_comb` reads variables assigned earlier in the same block (`cnt_d`, `quiet_d`); all outputs have defaults, so no
   latch is expected. Yosys/Verilator may still warn on widths; `RUN_LINTER: 1` is on in the config.
@@ -60,11 +65,19 @@ silicon result unless it says so.
 * `make -C test synth-check` (yosys parse/elaborate) exists in the Makefile but its own comment says it has never been
   run by the author; treat the first run as an experiment.
 
-### 1.5 Pass criteria for the gate (proposal)
+### 1.5 Pass criteria for the gate (CI part met; numeric comparison open)
 
 CI green on the branch: synthesis, placement, CTS, routing, KLayout DRC, LVS, precheck, `gl_test`, viewer. Then compare with
 the last good baseline (commit `d8bffd4`): cell count and area, utilisation, setup and hold WNS/TNS per corner, route
 congestion, DRC count. Send those numbers back; the claims in 1.1 to 1.3 stay "estimate" until then.
+
+### 1.6 `smp_q` constant-folding audit
+
+Yosys `OPT_MUXTREE` replaced `smp_q` by `1'0` on port A of the `smp_q ? 1'b0 : smp_q` mux (RTL `if (edge_w) if (smp_q)`
+branch). That is the select-0 arm of a mux whose select is `smp_q` itself, so the value is known there; `smp_q` is not a
+constant. It is still live: it gates the cell-index increment on an edge and has an enable in the netlist. Conclusion: no
+bug, no RTL change; the redundant `smp_d = 1'b0` inside the `if` could be dropped for tidiness only. Reasoning from the RTL;
+Yosys was not re-run.
 
 ## 2. Risk register
 
@@ -80,7 +93,7 @@ Severity and likelihood are the author's judgement. "Not proven by the cocotb te
 | R6 | **Rate drift beyond the tested range.** Host +-1.5 % (spec figure from memory) | Beyond about +-6 % the model fails; no test at larger errors | Low | Real clocks (crystal) are far inside; covered by R1 capture |
 | R7 | **No transmit path.** No ACK/NAK/STALL, no data stage, no NRZI/stuffing encoder, no turnaround timing, no EOP generation | Nothing to test; RX only | **High** for any device role | Out of scope for Phase D; software TX is plausible at 3-cycle granularity but was never analysed or built |
 | R8 | **RX FIFO and host speed.** 8-deep FIFO, `HPUSH` never blocks. An 11-byte packet delivers a byte every 267 cycles (5.3 us); overrun after about 48 us if the host does not drain | The cocotb host drains over SPI with ideal timing. A MicroPython host on an RP2350 has unknown latency | **High** for continuous traffic | Measure real host SPI round-trip; budget a drain strategy (early polling, burst reads) or a deeper buffer |
-| R9 | **Physical synthesis unverified.** No area, STA, power, congestion or gate-level numbers for the block | RTL sim only | Med | Section 1.5 |
+| R9 | **Physical synthesis numbers not reviewed.** CI synthesis, P&R, DRC/LVS/precheck and gl_test passed (author-reported), but area, STA slack, power and congestion have not been compared with baseline | Passing CI is a go/no-go, not a margin | Low-Med | Section 1.5 |
 | R10 | **Partial packets after enable/reset.** Changing `usb_en` or resetting mid-packet leaves stray bits and no STOP | Documented and asserted as behaviour, not fixed | Low | Procedure: change `usb_en` only while idle |
 | R11 | **Silent bad SYNC and false SYNC.** A corrupted SYNC is dropped without any event; a noise burst that looks like SYNC starts a bogus decode | Fuzz checks RTL equals model, not that dropping is acceptable for the application | Med | Decide whether a "bad SYNC" event is needed |
 | R12 | **Single author, single model.** RTL was written as a line-by-line transcription of the model, so a model bug is reproduced in RTL and invisible to RTL-vs-model tests | Passes by construction. The independent checks are: RTL outputs decoded back to packets, the pre-existing ISS-vs-RTL lockstep for the engine, CRC vectors | **High** | Independent implementation or captured traces (R1) |
@@ -97,7 +110,7 @@ Severity and likelihood are the author's judgement. "Not proven by the cocotb te
 | UART TX/RX, 8N1 | **Implemented and tested** | `uart_tx.asm`, `uart_rx.asm`; bit times 20, 100, 434 cycles, rate mismatch, overrun | no parity/2 stop bits/flow control |
 | SPI master, modes 0-3 | **Implemented and tested** | `spi_master.asm`, 4 modes, half period 12 and 24 cycles | no slave role |
 | I2C master | **Implemented and tested** | `i2c_master.asm`: write, read, NACK, clock stretching | no repeated START, no multi-master, no slave |
-| USB low-speed RX | **Implemented in RTL, simulation-tested only** | `ttpe_usb_rx.sv` + `usb_rx.asm` (hybrid: hardware bit slicer, software framing); synthetic waveforms with rate error, jitter, skew, stuff errors, lost EOP | not run on real USB, no CRC check, no PID decode, FIFO-limited (R8), electrically unverified (R2, R4) |
+| USB low-speed RX | **Implemented; RTL- and gate-level-simulated (top-level tests), CI physical flow passed, not tested on real USB** | `ttpe_usb_rx.sv` + `usb_rx.asm` (hybrid: hardware bit slicer, software framing); synthetic waveforms with rate error, jitter, skew, stuff errors, lost EOP | not run on real USB, no CRC check, no PID decode, FIFO-limited (R8), electrically unverified (R2, R4) |
 | USB low-speed TX / device response | **Theoretically possible, not implemented** | none | software NRZI + stuffing at 3-cycle granularity looks plausible; turnaround timing never analysed |
 | USB full-speed (12 Mb/s) | **Not feasible** with this architecture | none | 4.17 cycles per bit at 50 MHz is below the 3-cycle instruction spacing plus resync needs; would need a dedicated SIE |
 | 10BASE-T Ethernet | **Not feasible** | none | 10 Mb/s Manchester = 5 cycles per bit and 2.5 per half-bit; needs dedicated decoder, CRC32 and analog PHY/magnetics |
@@ -107,7 +120,7 @@ SYNC/EOP) is in hardware; software does framing, byte assembly and FIFO traffic.
 
 ## 4. Completion report
 
-Files changed or added (21; extract the zip at the repo root, nothing is committed by the author):
+Files changed or added (22 in the commit; the list below predates the commit and is kept as written):
 
 ```
  M docs/HOST_SPI.md  docs/ISA.md  info.yaml
@@ -119,8 +132,9 @@ Files changed or added (21; extract the zip at the repo root, nothing is committ
 ?? docs/PHASE_E_REPORT.md   (this file)
 ```
 
-State: RTL integrated and simulated by the user (79/79); Python suite 87/87 (author); ISA v0.2 unchanged; with
-`MODE.usb_en = 0` the design is the previous design plus 30 idle flops. Open: physical flow, gate-level test, real-trace
+State: RTL integrated and simulated by the user (79/79); Python suite 87/87 (author); GDS, precheck, gl_test and viewer CI
+jobs passed on `dev/protocol-continuation` (author-reported); ISA v0.2 unchanged; with
+`MODE.usb_en = 0` the design is the previous design plus 30 idle flops. Open: numeric comparison of the physical results with `d8bffd4`, real-trace
 replay, host drain budget, electrical interface.
 
 Suggested review focus if the source is read before the flow runs (about 15 minutes): `ttpe_usb_rx.sv` lines for the

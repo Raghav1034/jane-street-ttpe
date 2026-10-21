@@ -1,11 +1,15 @@
-# Low-speed USB receive on the TTPE: cycle budget and `ttpe_usb_rx` primitive (Phase D, proposal)
+# Low-speed USB receive on the TTPE: cycle budget and `ttpe_usb_rx` primitive (Phase D)
 
-Status: **RTL written (`src/ttpe_usb_rx.sv`) and integrated, but not yet simulated.** The authoring session had no
-HDL simulator, so the RTL and its cocotb tests (`test/test_ttpe_usb.py`, the `usb_*` scenarios in
-`test/ttpe_scenarios.py`, the `t_usb_*` chip-level tests) have never been run against a real simulator. Everything
-called "measured" below was produced by the Python reference model (`sw/usb_ls.py`) running against the
-cycle-accurate ISS (`sw/ttpe_iss.py`): `python3 -m unittest discover -s sw/tests`. Nothing was synthesised, placed
-or measured on silicon. ISA v0.2 is unchanged; with MODE.usb_en = 0 (reset value) the design behaves as before.
+Status: **RTL simulated (79/79), synthesised, placed, routed and gate-level tested; not tested on real USB.**
+RTL simulation (Icarus 12.0, cocotb 2.1.0, run by the project author): `TARGET=usb` 8/8, `TARGET=core` 55/55,
+`TARGET=top` 16/16. Physical flow: GitHub Actions on `dev/protocol-continuation` (commit `ba2e07b`), as reported by the project author: `gds` (LibreLane 3.1.0.dev3, ihp-sg13cmos5l), `precheck` (DRC/LVS/antenna/manifest), `gl_test` (all 16 `test_ttpe_top` tests on the synthesized gate-level netlist, including `t_usb_rx_e2e`, `t_usb_mode_register`, `t_usb_disabled_passthrough`) and `viewer` all passed. The authoring session saw the CI summary,
+not the raw logs; the cell count, area, WNS/TNS and congestion numbers have not been compared against baseline
+`d8bffd4` yet (see `PHASE_E_REPORT.md` 1.5). `gl_test` runs only the top-level tests, on one set of vectors: it is
+evidence that synthesis kept the tested behaviour, not a formal equivalence proof.
+Everything called "measured" below was produced by the Python reference model (`sw/usb_ls.py`) running against the
+cycle-accurate ISS (`sw/ttpe_iss.py`): `python3 -m unittest discover -s sw/tests` (87 tests). The USB signalling
+conventions come from the author's memory of the specification and no real USB capture has been replayed.
+ISA v0.2 is unchanged; with MODE.usb_en = 0 (reset value) the design behaves as before.
 
 ## 1. The budget
 
@@ -145,7 +149,9 @@ the core runs while the RTL primitive free-runs, so those tests also change `usb
 
 State counted from the model: cell counter 6 b, index 2 b, FSM 2 b, SYNC cell counter 3 b, ones counter 3 b,
 previous level 1 b, sampled flag 1 b, LOCKOUT counter 9 b + data/stop/err hold 3 b = **30 flops**.
-Gate count and area: **not synthesised, no estimate worth quoting.**
+Gate count and area: synthesis ran in CI (author-reported). The only figure seen by the authoring session is
+721 cells for the whole `tt_um_ttpe` after Yosys `OPT_MERGE`, before ABC technology mapping; that is neither the
+block's own size nor final area, so no area is quoted here.
 
 Known limitations of this definition: data comes from D+ only (D- is used just for SE0), so there is no
 differential noise immunity; CRC is not checked in hardware (host or program does it; the CRC5/CRC16 generators in
@@ -157,10 +163,10 @@ differential noise immunity; CRC is not checked in hardware (host or program doe
 
 `sw/examples/usb_rx.asm` (18 words). It pushes every byte to the RX FIFO, LSB first as received (PID first), and on
 packet end toggles `uo6` (every packet) and additionally `uo5` when the packet was bad (ERR, or a last byte that
-is not complete: `c1 != 8` tested with `MOV sr,c1` and `JSB sr[3]==1`). It does not run on the current RTL
-(no primitive). In-band framing is not possible with byte FIFO entries, which is why the end flag is on a pin.
+is not complete: `c1 != 8` tested with `MOV sr,c1` and `JSB sr[3]==1`). It runs on the RTL
+through `ttpe_usb_rx` (`t_usb_rx_e2e`, RTL and gate level). In-band framing is not possible with byte FIFO entries, which is why the end flag is on a pin.
 
-## 5. RTL change set (written, unsimulated)
+## 5. RTL change set (simulated; physical flow passed in CI)
 
 | File | Change |
 |---|---|
@@ -176,8 +182,20 @@ is not complete: `c1 != 8` tested with `MOV sr,c1` and `JSB sr[3]==1`). It does 
 Run (needs iverilog >= 11 and cocotb): `make -C test TARGET=usb`, `make -C test TARGET=core`,
 `make -C test TARGET=top`, or everything with `make -C test regress`. A mismatch between RTL and model is reported with
 the cycle number and both 4-bit values (`TARGET=usb`) or by the lockstep checker (`TARGET=core`).
-The physical flow (LibreLane, precheck, GL test) has to be re-run: 30 flops and a small comparator tree should be
-small next to the existing design, but that is a statement about size, not a measurement.
+The physical flow (LibreLane, precheck, GL test) passed in CI on this change (author-reported). Remaining: compare
+area, utilisation, setup/hold slack and congestion with baseline `d8bffd4`.
+
+### 5.1 Synthesis notes (from the Yosys log excerpts supplied by the author)
+
+* No latch inferred for any of the 12 `*_d` signals; the 11 state registers and `mode_usb_q` map to async-reset
+  flops; `st_q` was extracted as a 4-state FSM and recoded one-hot (4 flops instead of 2 at gate level, so the
+  netlist has more flops than the 30 counted at RTL; this is expected and harmless).
+* `OPT_MUXTREE` logged `smp_q -> 1'0` on port A of the `if (smp_q)` mux in the `edge_w` branch. This is a local
+  identity, not a constant `smp_q`: that mux is `smp_q ? 1'b0 : smp_q`, and in its select-0 arm `smp_q` is known to
+  be 0, so `smp_d` is 0 on every edge (as intended). `smp_q` still gates `idx_d = idx_inc_w` (a cell advances only
+  if it was already sampled), which is why it keeps an enable (`Adding EN signal`) and a register. The RTL
+  `if (smp_q) smp_d = 1'b0;` is therefore redundant but harmless; the index update is the live use. No RTL change
+  is needed. Verified by reading the RTL, not by re-running Yosys.
 
 ## 6. Not verified, do not rely on
 
@@ -186,8 +204,8 @@ small next to the existing design, but that is a statement about size, not a mea
 * Electrical feasibility of USB low-speed levels on the Tiny Tapeout/IHP pads, and the external 1.5 kOhm pull-up
   and series resistors. No analysis was done.
 * Any transmit path (NRZI encoder/stuffer for TX) and device-side response timing. This phase is receive only.
-* The RTL itself: never compiled or simulated by the author (no HDL tools were available). Timing closure with the
-  extra mux, area, and power: no synthesis was run.
+* Timing closure margin, area and power of the block: CI passed, but the slack, area and power numbers have not been
+  reviewed against baseline.
 * Behaviour with real hosts or captured traces; only generated waveforms (ppm, jitter, D-/D+ skew, lost EOP, glitches)
   were used. The generator and the model were written by the same author, so shared misreadings of the
   spec would not be caught; the independent checks are the CRC vectors and the packet decode through the engine.

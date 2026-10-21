@@ -22,9 +22,19 @@
 ;     bus-free time after STOP = TL.
 ;
 ; Host protocol (FIFO bytes):
-;   write:  (addr<<1)|0,  n,  d0 ... d(n-1)         n = 0 means 256
+;   write:  (addr<<1)|0,  n,  d0 ... d(n-1)         n[6:0] = byte count, 0 means 256
 ;   read :  (addr<<1)|1,  n                         engine pushes n bytes into the RX FIFO
-;   Reads ACK every byte but the last (NACK), then a STOP is generated.
+;   n[7] = 0: the transaction ends with a STOP (bus released).
+;   n[7] = 1: the transaction ends WITHOUT a STOP: SCL stays low, SDA released, the bus is held.
+;             The next command byte then starts with a REPEATED START (Sr) instead of a START:
+;                 write-register-pointer + read:   A0 81 REG   A1 n      (S A+W REG Sr A+R data P)
+;   Compatibility: counts 1..127 and 256 (n = 0, or n = 0x80 with Sr) work as before.  n values
+;   128..255 used to mean 128..255 bytes with a STOP; now n[7] selects Sr (count = n & 0x7F).
+;   Reads ACK every byte but the last (NACK), then a STOP (n[7] = 0) or the held bus (n[7] = 1).
+;   Sr timing: SCL low >= TL before the rising edge, SDA released while SCL is low, tSU;STA =
+;   SCL rise -> SDA fall = exactly TH, tHD;STA = SDA fall -> SCL fall = TH (same START macro).
+;   While the bus is held the engine waits in HPULL; the host must send the next command (or
+;   any command, e.g. a dummy one ending in STOP) - there is no timeout.
 ;   If a slave NACKs an address or data byte, the transaction ends with a STOP and the
 ;   error flag uo7 goes high (cleared when the next command byte arrives).
 ;   KNOWN GAP: the unread remainder of an aborted write is still in the host TX FIFO; the host
@@ -34,6 +44,9 @@
 .default TL, 250
 .default TH, 250
 .default DSH, 14
+.default RS_LOW, TL-19       ; Sr: delay before SCL rises.  Fastest path (next command already in the FIFO)
+                              ; gives SCL low = TL exactly (21 cycles of fixed overhead, measured on the ISS)
+.default RS_SU, TH-10         ; Sr: delay that makes tSU;STA = SCL rise -> SDA fall = exactly TH (10 fixed, measured)
 
 ; ---- Timing derivation (ISA rules: sequential spacing = delta+1, taken branch +3) ---------
 ;  data bit loop:  SHOUT -> PINS float(SCL up) -> WAIT -> PINS low(SCL down) -> DJNZ(taken)
@@ -91,6 +104,7 @@ cmd:
     HPULL @2                      ; (addr<<1)|rw
     PINS low uo7 @2               ; clear error flag
     MOV c1, sr @2                 ; remember rw in C1
+do_start:                         ; also entered from `hold` after the Sr set-up delay
     START
     SEND_BYTE
     GET_ACK nack
@@ -98,30 +112,57 @@ cmd:
     JSB sr[0]==1, do_read @2      ; branch on the R/W bit
 
 ; ------------------------------------------------------------------ write transaction
-    HPULL @2                      ; n
-    MOV c1, sr @2
-wr_loop:
+.macro WRITE_BODY lp exit         ; SR/C1 = count; byte loop, then jump to exit (lp: unique label)
+\lp:
     HPULL @2                      ; data byte
     SEND_BYTE
     GET_ACK nack
-    DJNZ c1, wr_loop @2
-    JMP stop @2
+    DJNZ c1, \lp @2
+    JMP \exit @2
+.endm
+    HPULL @2                      ; n
+    JSB sr[7]==1, wr_sr @2        ; n[7]: end with Sr instead of STOP
+    MOV c1, sr @2
+    WRITE_BODY wl_s, stop
+wr_sr:
+    ANDI sr, 0x7F @2
+    MOV c1, sr @2                 ; count 0 -> 256 (DJNZ wraps), as for n = 0
+    WRITE_BODY wl_h, hold
 
 ; ------------------------------------------------------------------- read transaction
-do_read:
-    HPULL @2                      ; n
-    MOV c1, sr @2
-rd_loop:
+.macro READ_BODY lp ak exit        ; lp, ak: unique labels (nested macros break \@)
+\lp:
     READ_BYTE
     HPUSH @2
-    DJNZ c1, ack_more @2          ; more bytes to come -> ACK, otherwise fall through (NACK)
+    DJNZ c1, \ak @2              ; more bytes to come -> ACK, otherwise fall through (NACK)
     PINS float uio3 @DSH          ; NACK = leave SDA high   (low time >= 3+3+3 + (DSH+1) + dlow+1)
     CLOCK_ACK_BIT TL-DSH-11
-    JMP stop @2
-ack_more:
+    JMP \exit @2
+\ak:
     PINS low uio3 @DSH            ; ACK = pull SDA low       (low time >= 3+3+3+3 + (DSH+1) + dlow+1)
     CLOCK_ACK_BIT TL-DSH-14
-    JMP rd_loop @2
+    JMP \lp @2
+.endm
+do_read:
+    HPULL @2                      ; n
+    JSB sr[7]==1, rd_sr @2
+    MOV c1, sr @2
+    READ_BODY rl_s, am_s, stop
+rd_sr:
+    ANDI sr, 0x7F @2
+    MOV c1, sr @2
+    READ_BODY rl_h, am_h, hold
+
+; ------------------------------------------- bus held (n[7] = 1): next command = repeated START
+; Entry: SCL low, SDA released.  The next command byte is fetched first (the bus stays held),
+; then SCL rises (low time >= TL), SDA stays high, and after exactly TH the START macro pulls SDA low.
+hold:
+    HPULL @2                      ; (addr<<1)|rw of the next transaction
+    PINS low uo7 @2               ; clear error flag
+    MOV c1, sr @2
+    PINS float uio2 @RS_LOW       ; SCL rises; SDA is already released (high)
+    WAIT high uio2 @2             ; clock stretching
+    JMP do_start @RS_SU           ; -> START macro: SDA falls TH after SCL rose, SCL TH later
 
 ; --------------------------------------------------------------------------- STOP
 nack:

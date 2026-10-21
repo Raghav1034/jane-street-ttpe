@@ -234,5 +234,8 @@ for _i, _sc in enumerate(scn.examples()):
 for _i, _sc in enumerate(scn.usb()):
     _register("test_%s" % _sc.name, lambda i=_i: scn.usb()[i])
 
+for _i, _sc in enumerate(scn.usb_tx()):
+    _register("test_%s" % _sc.name, lambda i=_i: scn.usb_tx()[i])
+
 for _i in range(12):
     _register("test_fuzz_%d" % _i, lambda i=_i: scn.scn_fuzz(i))

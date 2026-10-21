@@ -108,7 +108,7 @@ TTPE maps seamlessly to the standard Tiny Tapeout pad ring:
 | **Dedicated Inputs** | `ui_in[0]` | Input | **SPI SCK** (Host SPI Clock, Mode 0) | Input Source Pin 8 |
 | | `ui_in[1]` | Input | **SPI MOSI** (Host SPI Data In) | Input Source Pin 9 |
 | | `ui_in[2]` | Input | **SPI CS_N** (Host SPI Chip Select, active low) | Input Source Pin 10 |
-| | `ui_in[7:3]` | Input | General Purpose Engine Inputs | Input Source Pins 11..15 |
+| | `ui_in[7:3]` | Input | General Purpose Engine Inputs | Input Source Pins 11..15 (`ui_in[7:4]` become the USB receiver's virtual pins while `MODE[0]` = 1) |
 | **Dedicated Outputs** | `uo_out[0]` | Output | **SPI MISO** (active while `CS_N=0`) | Output Sink Pin 8 (when `CS_N=1`) |
 | | `uo_out[7:1]` | Output | General Purpose Engine Outputs | Output Sink Pins 9..15 |
 | **Bidirectional I/O** | `uio[7:0]` | In/Out | 100% Owned by TTPE Execution Unit | Pins 0..7 (Output, Input, Open-Drain) |
@@ -232,6 +232,7 @@ MISO  [ STATUS Byte (Immediate)         ][ Read Data 0    ][ Read Data 1    ]
 | `0x08` | **`SADDR_LO`**| R/W | `0x00` | SRAM word address bits `[7:0]` |
 | `0x09` | **`SADDR_HI`**| R/W | `0x00` | SRAM word address bit `[8]` |
 | `0x0A` | **`ERR`** | R/W1C| `0x00` | Sticky error flags: `b0`: SRAM access while running, `b1`: bad command, `b2`: TX FIFO push dropped |
+| `0x0B` | **`MODE`** | R/W | `0x00` | `b0`: `usb_en` enables the low-speed USB receiver primitive (bits `[7:1]` read 0). Cleared by chip reset only, not by `CTRL.core_reset`. Change only while the bus is idle |
 | `0x10` | **`TX_PUSH`** | W | — | Stream write: pushes bytes into TX FIFO (destination of `HPULL`) |
 | `0x11` | **`RX_POP`** | R | — | Stream read: pops bytes from RX FIFO (source of `HPUSH`) |
 | `0x12` | **`SRAM`** | R/W | — | Stream window: reads/writes 32-bit words (little-endian, auto-increments `SADDR`) |
@@ -300,13 +301,13 @@ TTPE implements a multi-tier, defense-in-depth verification hierarchy combining 
        +---------------------------------------------------+
 Level 5| Gate-Level Netlist Simulation (Icarus + PDK UDPs) |
        +---------------------------------------------------+
-Level 4| Chip-Level Pin Tests (test_ttpe_top.py, 13 tests)  |
+Level 4| Chip-Level Pin Tests (test_ttpe_top.py, 16 tests)  |
        +---------------------------------------------------+
-Level 3| Core Lockstep Co-Sim vs ISS (43 scenarios, 120k cy)|
+Level 3| Core Lockstep Co-Sim vs ISS (57 scenarios)         |
        +---------------------------------------------------+
 Level 2| SRAM Controller & Memory Tests (test_ttpe_mem.py)  |
        +---------------------------------------------------+
-Level 1| Instruction Set Simulator & Unit Tests (71 tests)  |
+Level 1| Instruction Set Simulator & Unit Tests (109 tests) |
        +---------------------------------------------------+
 ```
 
@@ -314,18 +315,22 @@ Level 1| Instruction Set Simulator & Unit Tests (71 tests)  |
 
 1. **Software Reference Model (`sw/ttpe_iss.py`):**
    - Pure Python cycle-exact instruction set simulator.
-   - 71 unit tests in `sw/tests/` verifying opcode behavior, register transfers, timing deltas, and edge-detect timing.
+   - 109 unit tests in `sw/tests/` (including the USB model, USB TX loopback and I2C repeated START) verifying opcode behavior, register transfers, timing deltas, and edge-detect timing.
 2. **SRAM Subsystem Verification (`test/test_ttpe_mem.py`):**
    - 18 cocotb testcases validating memory arbitration, host read/write latency, pipeline hold, flush, and wrap.
 3. **Core Lockstep Co-Simulation (`test/test_ttpe_core.py`):**
-   - 43 comprehensive scenarios executing ~120,000 simulated clock cycles.
+   - 57 lockstep scenarios (60 cocotb tests in total), including 9 low-speed USB receive, 3 USB transmit and 2 I2C repeated-START scenarios.
    - Compares the SystemVerilog RTL cycle-by-cycle against `ttpe_iss.py` in lockstep.
-   - Tested against 28 injected hardware mutants (all caught).
+   - Tested against 28 injected hardware mutants (all caught; this mutation run predates the USB block and was not repeated for it).
 4. **Chip Top Pin Verification (`test/test_ttpe_top.py`):**
-   - 13 comprehensive end-to-end tests driving the design strictly through its top-level pins (`ui_in`, `uo_out`, `uio`).
+   - 16 comprehensive end-to-end tests (including USB MODE register, USB receive and disabled-passthrough) driving the design strictly through its top-level pins (`ui_in`, `uo_out`, `uio`).
    - Verifies SPI slave framing, register read/write, memory loading, FIFO streaming, and protocol execution.
 5. **Gate-Level Simulation (`gl_test`):**
    - Runs on the post-synthesis, post-place-and-route gate netlist (`test/gate_level_netlist.v`) with full standard cell timing, UDPs, and PDK SRAM models.
+   - CI on `dev/protocol-continuation` (author-reported): `gds`, `precheck`, `gl_test` (16/16, incl. USB) and `viewer` passed with the USB receiver included.
+6. **Low-speed USB receiver (`test/test_ttpe_usb.py`):**
+   - 8 cocotb tests compare `ttpe_usb_rx` against the Python model `sw/usb_ls.py` on every clock (rate error, jitter, D-/D+ skew, bit stuffing, errors, enable/reset, ~82k-cycle fuzz). Run: `make -C test TARGET=usb`.
+   - RTL regression total: 8 + 55 + 16 = 79 tests, all passing (Icarus 12.0, cocotb 2.1.0).
 
 ### Cocotb 2.1 & Gate-Level Netlist CI Fix
 During CI runs with `cocotb >= 2.1.0`, passing test runs generate XML attributes formatted as:
@@ -384,6 +389,15 @@ All example protocols have been verified cycle-for-cycle against physical specif
 4. **`i2c_master.asm`:**
    - Verified for both Standard Mode (100 kHz) and Fast Mode (400 kHz).
    - Full support for I2C clock stretching by slave devices, ACK/NACK verification, and automatic STOP generation on error.
+   - **Repeated START:** set `n[7] = 1` in the count byte to end a transaction without STOP (SCL held low, SDA released); the next command then begins with a repeated START (tSU;STA = tHD;STA = exactly `TH`, SCL low >= `TL`, SDA released before SCL rises, open-drain only). Register read: host bytes `A0 81 REG A1 n` gives `S A+W REG Sr A+R data.. P`. `n[6:0]` is the count (0 = 256); counts 128..255 are no longer expressible. 114 words.
+5. **`usb_rx.asm` + `ttpe_usb_rx.sv` (low-speed USB receive, hybrid):**
+   - A 30-flop hardware bit slicer (`src/ttpe_usb_rx.sv`) recovers 1.5 Mb/s bit timing (33/33/34-cycle cells at 50 MHz), NRZI-decodes, removes bit stuffing and detects SYNC, EOP and stuff errors. It is enabled by `MODE[0]` (register `0x0B`) and drives the virtual pins `ui_in[4]` TICK, `ui_in[5]` DATA, `ui_in[6]` STOP, `ui_in[7]` ERR (source pins 12..15). D+ = `uio[6]`, D- = `uio[7]`.
+   - An 18-word program (`sw/examples/usb_rx.asm`) pushes each received byte to the RX FIFO and toggles `uo_out[6]` at every packet end (and `uo_out[5]` for a bad packet). ISA v0.2 is unchanged; with `MODE[0]` = 0 the design behaves as before.
+   - **Scope and limits:** receive only (no transmit, no CRC/PID check in hardware), 8-byte RX FIFO that the host must drain, electrical USB levels and pull-ups are external and unverified. Verified in RTL and gate-level simulation against synthetic waveforms; not run against real USB. Details: `docs/USB_LS_RX.md`, `docs/PHASE_E_REPORT.md`.
+6. **`usb_tx.asm` (low-speed USB transmit, software only):**
+   - Host pushes `n` then `n` bytes (PID + payload + CRC, already formed); the program sends SYNC, NRZI/bit-stuffed data LSB first on D+ = `uio[6]`, D- = `uio[7]` (push-pull, released afterwards), then SE0 for 2 bit times and J for 1. Cells are 33/34 cycles (266 cycles per byte, -0.25% vs 1.5 Mb/s). 72 words, no RTL change.
+   - The waveform is checked cycle for cycle against `sw/usb_ls.py` and looped back through the `ttpe_usb_rx` model and `usb_rx.asm` for ACK, NAK, SETUP, DATA0 and an all-0xFF DATA1.
+   - **Limits:** CRC must come from the host (three registers cannot hold a CRC16); the TX FIFO must stay ahead of the wire (a late byte stretches the line); no turnaround or response logic; electrical levels, pull-ups and series resistors are external and unverified; checked in simulation only.
 
 ---
 
@@ -416,10 +430,11 @@ jane-street-ttpe/
 │   ├── ttpe_mem_subsys.sv  # SRAM macro wrapper & controller interface
 │   ├── ttpe_reset_sync.sv  # Asynchronous assert, synchronous release reset tree
 │   ├── ttpe_spi_phy.sv     # SPI physical-layer bit framing & shift registers
+│   ├── ttpe_usb_rx.sv      # Low-speed USB receive bit slicer (NRZI, unstuff, SYNC/EOP), behind MODE[0]
 │   └── ttpe_sram_ctrl.sv   # Deterministic 3-stage SRAM memory arbiter
 ├── sw/
-│   ├── examples/           # Assembly programs: uart_tx, uart_rx, spi_master, i2c_master
-│   ├── tests/              # 71 Python ISA and ISS unit tests
+│   ├── examples/           # Assembly programs: uart_tx, uart_rx, spi_master, i2c_master, usb_rx, usb_tx
+│   ├── tests/              # 109 Python ISA, ISS, USB and I2C unit tests
 │   ├── ttpe_asm.py         # Complete macro assembler
 │   ├── ttpe_isa.py         # Canonical source of truth for instruction encodings
 │   ├── ttpe_iss.py         # Cycle-exact Instruction Set Simulator (ISS)
@@ -468,6 +483,9 @@ make TARGET=core
 
 # Run chip-level pin verification
 make TARGET=top
+
+# Run the low-speed USB receiver against its Python model
+make TARGET=usb
 
 # Run complete regression suite across both PDK and stand-in models
 make regress
@@ -545,6 +563,8 @@ Because TTPE is fundamentally architected as a **cycle-exact programmable packet
 - **Financial Market Data Acceleration:** By pairing the 512×32 instruction engine with an RMII front-end, TTPE can inspect incoming UDP/IP multicast market packets (e.g., NASDAQ ITCH, CME MDP 3.0), parse order book updates on the fly, and trigger sub-microsecond deterministic trading actions over dedicated output pins.
 
 ### Phase 2: Native USB Transceiver Integration
+> **Status:** a hybrid *low-speed* (1.5 Mb/s) USB receive path is already implemented (see section 10); the full-speed items below remain proposals. Full-speed (4.17 cycles/bit at 50 MHz) is below the engine's 3-cycle instruction spacing plus resync needs and would require a dedicated serial interface engine.
+
 - **USB 1.1 / 2.0 Full-Speed (12 Mbps):**
   - Implement digital NRZI (Non-Return-to-Zero Inverted) encoding and decoding blocks.
   - Implement hardware bit-stuffing and unstuffing state machines.

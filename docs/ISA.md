@@ -130,17 +130,21 @@ All parameters are assembler `-D` values; every claim below is asserted in `sw/t
 | `uart_tx.asm` | `BIT` cycles per bit (default 434 = 115200 baud) | Every bit boundary exactly `BIT` cycles apart; back-to-back frames exactly `10*BIT` apart (1 stop bit); start bit on the pad exactly 7 cycles after the host byte arrives; `BIT` 16 to 434 tested, `BIT` 8 rejected. |
 | `uart_rx.asm` | `BIT` (even) | Samples exactly at bit centres; 24-byte streams decoded at nominal rate and with about 2% baud mismatch; overrun counted. No framing, parity or stop-bit check. |
 | `spi_master.asm` | `CPOL`, `CPHA`, `H` half-period | Modes 0-3 data-exact; SCK half periods exactly `H` inside a byte; `H >= 12` (CPHA 0) or `>= 9` (CPHA 1), which is up to 2.08 / 2.78 MHz at 50 MHz. |
-| `i2c_master.asm` | `TL`, `TH` (SCL low/high cycles), `DSH` | Write, read (last byte NACKed), address NACK -> error flag `uo7` + STOP, clock stretching. SCL high exactly `TH`, low exactly `TL` inside a byte (longer between bytes). 100 kHz (`TL=TH=250`) and 400 kHz (`TL=75, TH=50`) meet the I2C minimum low/high times. |
+| `i2c_master.asm` | `TL`, `TH` (SCL low/high cycles), `DSH` | Write, read (last byte NACKed), address NACK -> error flag `uo7` + STOP, clock stretching. **Repeated START:** count byte `n[7] = 1` ends the transaction without STOP (bus held: SCL low, SDA released) and the next command byte starts with a repeated START (SCL low >= `TL`, tSU;STA = tHD;STA = exactly `TH`); `n[6:0]` is the byte count (0 = 256), so counts 128..255 are no longer expressible. Register read = host bytes `A0 81 REG A1 n`. SCL high exactly `TH`, low exactly `TL` inside a byte (longer between bytes). 100 kHz (`TL=TH=250`) and 400 kHz (`TL=75, TH=50`) meet the I2C minimum low/high times. |
+| `usb_rx.asm` | none (needs MODE[0] = 1: `ttpe_usb_rx` virtual pins ui4..ui7) | Hybrid low-speed USB receive, see `USB_LS_RX.md`. |
+| `usb_tx.asm` | `EXT2`, `EXT5` (extra cycle after bit 2 / 5, default 1) | Low-speed USB transmit on D+ = `uio6`, D- = `uio7`, software only: host pushes `n, PID, payload/CRC...`; SYNC, NRZI (`PINS toggle` on 0 bits), bit stuffing (`C0` countdown), EOP (SE0 66 cycles, J 33, release). Cells 33/34 cycles (266 per byte), waveform checked cycle for cycle against `usb_ls.tx_expected`, loopback through `ttpe_usb_rx` model and `usb_rx.asm`. 72 words. CRC must be supplied by the host; FIFO must stay ahead of the wire (HPULL deadline = its commit cycle). |
 
-Known limitations: I2C has **no repeated START** (so the usual "write register pointer, then read" sequence is
-not yet possible), no multi-master arbitration and no 10-bit addressing; an aborted I2C write leaves its remaining
+Known limitations: I2C has no multi-master arbitration and no 10-bit addressing, and `n` values 128..255 now mean
+"count `n & 0x7F` with repeated START" (the count byte is no longer a plain 0..255 count); an aborted I2C write leaves its remaining
 bytes in the host TX FIFO until a flush control exists.
 
 ## 7. Verification status
 
-* 71 unit and protocol tests, standard library only: `python3 -m unittest discover -s sw/tests -v`.
+* 109 unit and protocol tests (including USB receive/transmit and I2C repeated START), standard library only: `python3 -m unittest discover -s sw/tests -v`.
 * Fault injection: shortening the modelled fetch latency, a one-cycle-late UART sample, an off-by-one SPI sample
   delta and a missing synchroniser stage were each caught by the tests.
+* **Not yet done:** the reference model has not been compared against RTL, because the Execution Unit RTL does not
+  exist yet. Until it does, this document and the model are a specification, not a verified implementation.
 
 ## 8. Open items
 

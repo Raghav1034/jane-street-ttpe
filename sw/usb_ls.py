@@ -122,6 +122,51 @@ def waveform(packets, gap_cycles=400, eop_cycles=50, ppm=0, jitter=0, skew=0, se
     return dp, dm
 
 
+# ---------------------------------------------------------------- transmitter (usb_tx.asm) reference
+TX_EXT_BITS = (2, 5)      # data bits whose cell is 34 cycles wide in usb_tx.asm (EXT2/EXT5 = 1)
+
+
+def tx_cells(byte_list, ext_bits=TX_EXT_BITS):
+    """Cells sent by usb_tx.asm: list of (level, width_cycles), level 1 = K.  SYNC = 8 cells of 33;
+    a data bit k (LSB first) is 33 wide (+1 if k in ext_bits); a stuffed 0 is 33 wide and follows the
+    sixth consecutive 1 immediately (also at the very end of the packet).  Bit stuffing starts counting
+    after SYNC (same convention as encode_levels)."""
+    cells, level, ones = [], 0, 0
+
+    def put(bit, width):
+        nonlocal level
+        if bit == 0:
+            level ^= 1
+        cells.append((level, width))
+
+    for bit in (0, 0, 0, 0, 0, 0, 0, 1):
+        put(bit, 33)
+    for byte in byte_list:
+        for k in range(8):
+            bit = (byte >> k) & 1
+            put(bit, 33 + (1 if k in ext_bits else 0))
+            if bit:
+                ones += 1
+                if ones == 6:
+                    put(0, 33)
+                    ones = 0
+            else:
+                ones = 0
+    return cells
+
+
+def tx_expected(byte_list, ext_bits=TX_EXT_BITS, se0=66, j=33):
+    """Per-cycle (dp, dm) the transmitter must produce, starting at the first SYNC edge (first K):
+    cells, SE0 for `se0` cycles, J for `j` cycles.  Afterwards the bus is released = J."""
+    dp, dm = [], []
+    for lv, w in tx_cells(byte_list, ext_bits):
+        dp += [lv] * w
+        dm += [1 - lv] * w
+    dp += [0] * (se0 + j)
+    dm += [0] * se0 + [1] * j
+    return dp, dm
+
+
 # ---------------------------------------------------------------- primitive reference model
 CELL = (33, 33, 34)       # cycles per cell, three-cell pattern = 100 cycles = 3 bits
 SAMPLE_AT = 16            # sample when the cycle counter of the cell reaches this value
