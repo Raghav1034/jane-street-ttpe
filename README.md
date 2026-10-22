@@ -582,9 +582,13 @@ Because TTPE is fundamentally architected as a **cycle-exact programmable packet
 
 ---
 
-## 14. Design, Verification & AI-Assisted Engineering Methodology
+## 14. Design, Verification and AI Assistance
 
-**How AI tools were used.** The design was built with heavy use of an AI assistant (Claude, Anthropic) under a human engineer's direction: the assistant drafted the ISA text, the Python models (`sw/ttpe_iss.py`, `sw/usb_ls.py`), SystemVerilog, cocotb testbenches and lockstep scenarios, assembly programs and documentation. The human engineer set the rules (zero hallucination, exact cycle arithmetic, protected ISA and physical baseline, no commits without authorisation), ran every RTL simulation and every GitHub Actions flow himself, reviewed results, and decided what to accept. For the USB phase the assistant's sandbox had no HDL simulator, so the RTL was first written without being simulated and then verified by the engineer running Icarus Verilog and cocotb locally; claims in the documents are tagged with where the evidence comes from.
+**How AI tools were used.** AI assistance (Claude, Anthropic and Gemini, Google) was used extensively throughout the project, primarily to accelerate drafting, implementation, and documentation. Under the engineer’s direction, Claude helped develop the ISA specification, Python reference models (`sw/ttpe_iss.py`, `sw/usb_ls.py`), SystemVerilog RTL, cocotb testbenches, lockstep scenarios, assembly programs, and supporting documentation.
+
+The engineer remained responsible for the technical direction and final decisions, defining the design constraints, reviewing generated code, running RTL simulations and GitHub Actions workflows, checking results, and deciding which changes to retain. Key constraints included avoiding unsupported assumptions, maintaining exact cycle-level arithmetic, preserving the protected ISA and physical-design baseline, and requiring explicit authorisation before commits.
+
+During the USB phase, the AI environment did not have access to an HDL simulator. The RTL was therefore initially developed without simulation in that environment and subsequently tested by the engineer locally using Icarus Verilog and cocotb. Documentation distinguishes between claims supported by test evidence and those based on design or implementation review.
 
 **Method.**
 1. *Model first.* `ttpe_isa.py` / `ttpe_iss.py` define a cycle-exact golden model (`commit = accept + 1 + delta`, 3-cycle branch penalty, 2-flop input synchroniser). Protocol programs are written and timing-checked on the model before any RTL depends on them.
