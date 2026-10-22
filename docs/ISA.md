@@ -140,17 +140,17 @@ bytes in the host TX FIFO until a flush control exists.
 
 ## 7. Verification status
 
-* 109 unit and protocol tests (including USB receive/transmit and I2C repeated START), standard library only: `python3 -m unittest discover -s sw/tests -v`.
+* 121 unit and protocol tests (including USB receive/transmit and I2C repeated START), standard library only: `python3 -m unittest discover -s sw/tests -v`.
 * Fault injection: shortening the modelled fetch latency, a one-cycle-late UART sample, an off-by-one SPI sample
   delta and a missing synchroniser stage were each caught by the tests.
-* **Not yet done:** the reference model has not been compared against RTL, because the Execution Unit RTL does not
-  exist yet. Until it does, this document and the model are a specification, not a verified implementation.
+* The Execution Unit RTL exists and is compared cycle by cycle with this model in cocotb lockstep (`make -C test TARGET=core`,
+  60 tests, 57 lockstep scenarios), at the chip pins (`TARGET=top`, 16 tests) and on the gate-level netlist in CI (`gl_test`).
+  Results are as reported by the project author. Nothing has run on silicon.
 
 ## 8. Open items
 
-1. Host register map (run/halt/reset PC, FIFO status and flush, flags) and FIFO depths for the RTL.
-2. Final pin plan: which pins the host SPI slave uses, and which of the 8 inputs / 8 outputs remain for programs.
-3. Repeated START for I2C, and a decision on CRC / bit-stuffing / NRZI support for the stretch protocols
-   (opcodes E-F are free; `JSB` allows software implementations at 3-cycle granularity).
-4. Execution Unit RTL, then cross-check against the model cycle by cycle in cocotb.
-5. Synthesis to get real area and timing numbers; none are claimed here.
+1. Replay a real captured low-speed USB trace (all USB signalling conventions are from the author's memory).
+2. Compare the physical-flow numbers with the baseline run (Max Slew/Max Cap warnings, hold buffers; see `PHASE_E_REPORT.md` 1.7).
+3. Board-level bring-up: pull-ups, series resistors, 3.3 V levels (see `docs/info.md`); USB thresholds are unverified.
+4. USB: CRC generation, turnaround timing and automatic responses remain host/firmware work.
+5. 10BASE-T Ethernet and USB full-speed are out of reach at 50 MHz without dedicated hardware.

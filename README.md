@@ -33,6 +33,7 @@
 11. [Repository Tour & Directory Structure](#11-repository-tour--directory-structure)
 12. [Quick-Start: Simulation, Assembly & Hardening](#12-quick-start-simulation-assembly--hardening)
 13. [Future Expansion Roadmap: Ethernet & USB](#13-future-expansion-roadmap-ethernet--usb)
+14. [Design, Verification & AI-Assisted Engineering Methodology](#14-design-verification--ai-assisted-engineering-methodology)
 
 ---
 
@@ -307,7 +308,7 @@ Level 3| Core Lockstep Co-Sim vs ISS (57 scenarios)         |
        +---------------------------------------------------+
 Level 2| SRAM Controller & Memory Tests (test_ttpe_mem.py)  |
        +---------------------------------------------------+
-Level 1| Instruction Set Simulator & Unit Tests (109 tests) |
+Level 1| Instruction Set Simulator & Unit Tests (121 tests) |
        +---------------------------------------------------+
 ```
 
@@ -315,7 +316,7 @@ Level 1| Instruction Set Simulator & Unit Tests (109 tests) |
 
 1. **Software Reference Model (`sw/ttpe_iss.py`):**
    - Pure Python cycle-exact instruction set simulator.
-   - 109 unit tests in `sw/tests/` (including the USB model, USB TX loopback and I2C repeated START) verifying opcode behavior, register transfers, timing deltas, and edge-detect timing.
+   - 121 unit tests in `sw/tests/` (including the USB model, USB TX loopback, I2C repeated START and the host driver) verifying opcode behavior, register transfers, timing deltas, and edge-detect timing.
 2. **SRAM Subsystem Verification (`test/test_ttpe_mem.py`):**
    - 18 cocotb testcases validating memory arbitration, host read/write latency, pipeline hold, flush, and wrap.
 3. **Core Lockstep Co-Simulation (`test/test_ttpe_core.py`):**
@@ -434,7 +435,7 @@ jane-street-ttpe/
 │   └── ttpe_sram_ctrl.sv   # Deterministic 3-stage SRAM memory arbiter
 ├── sw/
 │   ├── examples/           # Assembly programs: uart_tx, uart_rx, spi_master, i2c_master, usb_rx, usb_tx
-│   ├── tests/              # 109 Python ISA, ISS, USB and I2C unit tests
+│   ├── tests/              # 121 Python ISA, ISS, USB, I2C and host-driver unit tests
 │   ├── ttpe_asm.py         # Complete macro assembler
 │   ├── ttpe_isa.py         # Canonical source of truth for instruction encodings
 │   ├── ttpe_iss.py         # Cycle-exact Instruction Set Simulator (ISS)
@@ -463,7 +464,13 @@ Run the standalone ISA and ISS unit tests:
 python3 -m unittest discover -s sw/tests -v
 ```
 
-Assemble an example application:
+Assemble all six example programs into `sw/build/` (`.hex` for `$readmemh`, `.bin`, and `.py` = `PROGRAM = [...]` for the host):
+```bash
+make -C sw images                       # uart_tx uart_rx spi_master i2c_master usb_rx usb_tx
+make -C sw images ASMFLAGS="-D BIT=100" # extra assembler options (-D NAME=VALUE) for every program
+```
+
+Assemble a single example application:
 ```bash
 # Assemble UART transmitter for 50 MHz core clock (115200 baud)
 python3 sw/ttpe_asm.py sw/examples/uart_tx.asm -o uart_tx.hex
@@ -528,6 +535,8 @@ wr(0x03, 0x00); wr(0x04, 0x00) # PC = 0
 wr(0x02, 0x03)                 # CTRL: pc_load | resume
 ```
 
+A fuller driver, `sw/host_demo_rp2350.py`, adds ID/halt checks, SRAM load with readback, `MODE` (`0x0B`), TX FIFO flow control (8 deep), RX draining and one demo per protocol (UART transmit, I2C register read with repeated START, USB packet send, USB receive). Its register layer is unit-tested on CPython against a model of `docs/HOST_SPI.md` (`sw/tests/test_host_demo.py`); the Tiny Tapeout SDK layer for the demo board is untested. After the project is deselected on the shuttle mux the chip loses power: reset it and reload the SRAM.
+
 ---
 
 ## 13. Future Expansion Roadmap: Ethernet & USB
@@ -570,6 +579,23 @@ Because TTPE is fundamentally architected as a **cycle-exact programmable packet
   - Implement hardware bit-stuffing and unstuffing state machines.
   - Dedicated USB Token (IN/OUT/SETUP) and CRC5/CRC16 verification engines.
 - **Microarchitecture Independence:** The TTPE execution unit will control USB packet flow and transaction logic via high-level descriptors, while the physical bit-level state machines handle 12 MHz line modulation, creating a universal, jitter-free bridge between modern PCs and embedded hardware.
+
+---
+
+## 14. Design, Verification & AI-Assisted Engineering Methodology
+
+**How AI tools were used.** The design was built with heavy use of an AI assistant (Claude, Anthropic) under a human engineer's direction: the assistant drafted the ISA text, the Python models (`sw/ttpe_iss.py`, `sw/usb_ls.py`), SystemVerilog, cocotb testbenches and lockstep scenarios, assembly programs and documentation. The human engineer set the rules (zero hallucination, exact cycle arithmetic, protected ISA and physical baseline, no commits without authorisation), ran every RTL simulation and every GitHub Actions flow himself, reviewed results, and decided what to accept. For the USB phase the assistant's sandbox had no HDL simulator, so the RTL was first written without being simulated and then verified by the engineer running Icarus Verilog and cocotb locally; claims in the documents are tagged with where the evidence comes from.
+
+**Method.**
+1. *Model first.* `ttpe_isa.py` / `ttpe_iss.py` define a cycle-exact golden model (`commit = accept + 1 + delta`, 3-cycle branch penalty, 2-flop input synchroniser). Protocol programs are written and timing-checked on the model before any RTL depends on them.
+2. *Lockstep RTL co-simulation.* The Execution Unit RTL is compared with the model every cycle in cocotb (`make -C test TARGET=core`: 60 tests, 57 lockstep scenarios including directed ISA, FIFO and host-interface cases, protocol examples, USB receive/transmit, I2C repeated START and random fuzz). Chip-pin tests (`TARGET=top`, 16) drive only `ui_in`/`uio` and check `uo_out`/`uio`.
+3. *Fault injection.* An earlier mutation run (28 hardware mutants, all caught) predates the USB block and was not repeated for it. Smaller injected faults (a late stuffed edge, a wrong ones-counter reload, an off-by-one repeated-START setup time, a short SCL-low) were each caught by the USB-transmit and I2C tests.
+4. *Primitive against its specification.* The USB bit slicer `ttpe_usb_rx` is compared per cycle with its Python model (`TARGET=usb`, about 82k fuzz cycles), plus an independent decode of its outputs back to packet bits; the transmit program is checked cycle for cycle against `usb_ls.tx_expected` and looped back through the receive model and `usb_rx.asm`.
+5. *Gate level and physical.* The same top-level tests run on the synthesised netlist in CI (`gl_test`), with the LibreLane flow, DRC, LVS and the Tiny Tapeout precheck. Power-grid alignment of the IHP SRAM macro is described in section 8.
+
+**Evidence and its limits.** Python suite: 121 tests. RTL: 84 cocotb tests (8 + 60 + 16) as reported by the engineer after the final changes; GDS, precheck, `gl_test` and viewer jobs green in CI. Not covered, and listed with severity in `docs/PHASE_E_REPORT.md`: models, RTL and tests share one author, so a shared misreading would pass every test; the USB signalling conventions and tolerances are from memory and were never checked against a real host or captured trace; pad electricals, pull-ups and USB thresholds are unverified; nothing has run on silicon. The CI log shows Max Slew / Max Cap warnings and 874 hold buffers that have not been compared with an earlier run.
+
+Reproduce: `python3 -I -m unittest discover -s sw/tests -v`, `make -C test regress` (needs Icarus Verilog and cocotb), `make -C sw images`.
 
 ---
 

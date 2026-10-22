@@ -203,7 +203,11 @@ area, utilisation, setup/hold slack and congestion with baseline `d8bffd4`.
   thresholds. The figures used here are from memory.
 * Electrical feasibility of USB low-speed levels on the Tiny Tapeout/IHP pads, and the external 1.5 kOhm pull-up
   and series resistors. No analysis was done.
-* Any transmit path (NRZI encoder/stuffer for TX) and device-side response timing. This phase is receive only.
+* Transmit: low-speed USB transmit now exists as software on the unchanged engine (`sw/examples/usb_tx.asm`, 72 words:
+  SYNC, NRZI via `PINS toggle`, bit stuffing with a `C0` countdown, EOP; 33/34-cycle cells). It is verified in ISS
+  loopback and RTL lockstep only. Device-side response timing, automatic ACK/NAK decisions and CRC5/CRC16 generation
+  are not implemented (the host supplies finished packets), and the same caveats apply: synthetic and model-based
+  verification, no real USB trace, external pull-ups/series resistors/levels unverified.
 * Timing closure margin, area and power of the block: CI passed, but the slack, area and power numbers have not been
   reviewed against baseline.
 * Behaviour with real hosts or captured traces; only generated waveforms (ppm, jitter, D-/D+ skew, lost EOP, glitches)
