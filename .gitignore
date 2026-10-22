@@ -1,0 +1,28 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Software assembler outputs
+sw/build/
+
+# Cocotb and simulator build directories & artifacts
+test/sim_build/
+test/sim_build_*/
+test/results*.xml
+test/results.xml
+test/tb.fst
+test/output/
+test/lint_*.vvp
+*.vvp
+*.fst
+*.vcd
+
+# Agent configurations and skills
+.agents/
+skills-lock.json
+
+# Operating System files
+.DS_Store
+Thumbs.db

@@ -344,7 +344,7 @@ The Tiny Tapeout gate-level verification workflow (`gl_test/action.yml`) invokes
 ```
 Because the string `failure` matched the attribute name `failures="0"`, clean passing runs were incorrectly reported as failed.
 
-**The Solution:** [test/Makefile](file:///c:/msys64/home/Relanto/jane-street-ttpe/test/Makefile) includes a targeted post-processing rule under `GATES=yes`:
+**The Solution:** [test/Makefile](test/Makefile) includes a targeted post-processing rule under `GATES=yes`:
 ```makefile
 ifeq ($(GATES),yes)
 .DEFAULT_GOAL := gl
