@@ -199,8 +199,9 @@ area, utilisation, setup/hold slack and congestion with baseline `d8bffd4`.
 
 ## 6. Not verified, do not rely on
 
-* USB specification numbers: tolerance +-1.5 %, EOP width, jitter budget, turnaround timing, receiver
-  thresholds. The figures used here are from memory.
+* USB specification numbers: the polarity, stuffing rule, +-1.5 % tolerance and 1.25-1.50 us EOP are cross-checked
+  against public sources (section 7.1); the jitter budget, receiver acceptance widths, receiver thresholds and the
+  turnaround window are not (the turnaround numbers were relayed to us).
 * Electrical feasibility of USB low-speed levels on the Tiny Tapeout/IHP pads, and the external 1.5 kOhm pull-up
   and series resistors. No analysis was done.
 * Transmit: low-speed USB transmit now exists as software on the unchanged engine (`sw/examples/usb_tx.asm`, 72 words:
@@ -213,3 +214,54 @@ area, utilisation, setup/hold slack and congestion with baseline `d8bffd4`.
 * Behaviour with real hosts or captured traces; only generated waveforms (ppm, jitter, D-/D+ skew, lost EOP, glitches)
   were used. The generator and the model were written by the same author, so shared misreadings of the
   spec would not be caught; the independent checks are the CRC vectors and the packet decode through the engine.
+
+## 7. Specification check, independent vectors and the autonomous handshake
+
+### 7.1 Constants checked (2026-10-22 and 2026-10-23)
+
+The USB 2.0 specification text itself could not be read from this environment: the PDF copies reachable
+here return only front matter and the table of contents. What was checked, and against what:
+
+| Item | Value in model / firmware | Evidence | Status |
+|---|---|---|---|
+| Low-speed J / K / SE0 | idle J = D+ 0, D- 1; K = D+ 1, D- 0; SE0 = both 0 | comments in an open-source logic-analyzer USB decoder ("Low-speed: DP=1,DM=0 is K, DP=0,DM=1 is J") | confirmed by an independent source |
+| Pull-up | device pull-up on D- for low speed | Beyond Logic "USB in a NutShell" (Figure 3 caption) | confirmed |
+| Bit rate and tolerance | 1.5 Mb/s +-1.5 % (+-15,000 ppm); TX is 0.25 % slow | Beyond Logic: "1.50Mb/s with a data signalling tolerance of +-1.5%"; RX tested at +-15,000 ppm | confirmed |
+| Bit stuffing | a 0 after six consecutive 1s | same open-source decoder; Figure 7-33 "Extra Bit Preceding EOP" exists in the spec's figure list (matches the stuffed 0 that `usb_tx.asm` sends after a packet ending in six 1s) | confirmed (rule); spec text not read |
+| EOP | SE0 for two bit intervals, then J; low-speed source width 1.25 .. 1.50 us | open-source decoder comment ("1.25uS - 1.50uS" low speed). `usb_tx.asm`: SE0 66 cycles = 1.32 us, then J 33 cycles | confirmed (source width); receiver acceptance widths not checked |
+| SYNC and NRZI | SYNC = KJKJKJKK, 0 = transition, LSB first | consistent with the supplied SETUP/ACK line-level tables, which were re-derived by hand (7.2); spec text not read | consistent, not independently sourced |
+| SYNC's last 1 in the stuffing count | the count restarts after SYNC | The passage relayed to us for section 7.1.9 reads as a paraphrase and was not used. Argument instead: a valid PID byte is `p[3:0]` followed by `~p[3:0]`, so it starts with at most four 1s; counting SYNC's trailing 1 gives a run of at most five, never six. Both conventions therefore give identical line levels for every valid packet (`test_stuffing_convention_after_sync_is_irrelevant_for_valid_packets`, all 16 PIDs with run-heavy payloads). They differ only for an invalid first byte such as 0xFF | shown by test, independent of the spec wording |
+| Device turnaround | 2 .. 6.5 bit times at the device (67 .. 216 cycles); 7.5 bit times (250 cycles) with hub and cable | relayed only; section 7.1.18 "Bus Turn-around Time and Inter-packet Delay" exists in the spec's table of contents, numbers not read | **unverified** |
+
+### 7.2 Independent vectors
+
+`IndependentVectors` in `sw/tests/test_usb_ls_rx.py` feeds literal line levels (not produced by `encode_levels`)
+for SETUP `2D 00 10`, DATA0 `C3 80 06 00 01 00 00 40 00 DD 94` and ACK `D2` into the receiver model and into
+`usb_rx.asm` on the ISS; all decode to the exact bytes with no error flag. The SETUP and ACK level tables were
+supplied with the task (stated to match a sigrok low-speed HID capture; that capture was not fetched, so the
+provenance is relayed), and both were re-derived by hand from NRZI and agree. The DATA0 levels were derived with
+separate throw-away code and frozen as a literal; its CRC16 0x94DD equals the value in the supplied table. This
+shows that the model and firmware agree with these vectors, not that a real host would accept our transmissions.
+
+### 7.3 Autonomous handshake: `sw/examples/usb_device_ack.asm` (124 words)
+
+Receive as in `usb_rx.asm` (the PID byte is also kept in `C0`), on packet end flag it (`uo6`, `uo5`), reject it on
+a stuff violation (`ui7`) or a partial last byte (`c1 != 8`), otherwise `WAIT high uio7` (D- back to J = end of
+the host's SE0), compare the PID (`XORI`, `ADDI 1`, `DJNZ` match trick) and answer DATA0/DATA1 with ACK, IN with
+NAK, anything else with nothing. The response reuses the `usb_tx.asm` bit loop with the byte taken from a register.
+
+* **Timing (ISS, closed-loop bus):** first K edge of the response = 140 cycles (4.2 bit times) after the end of
+  the host SE0 on all three paths (padding `PAD_D0`/`PAD_D1`/`PAD_IN` = 76/58/46), for host SE0 widths 62 .. 75
+  cycles, host rate +-1.5 %, jitter and skew. Measured from the end of the J bit that follows the SE0 it is 107
+  cycles. Both readings lie inside the relayed 67 .. 216 window, which is itself unverified.
+* **Self-reception:** with `usb_en = 1` the slicer reads the pads, so it sees the chip's own response and raises
+  TICK/STOP during it. The program is inside the transmit loop at that time and returns to its receive loop only
+  after the pins are released; the tests (bus read-back included) show exactly one `uo6` toggle per host packet,
+  no spurious bytes, and correct reception of a host packet that starts 20 cycles after the release.
+* **Not a compliant device:** no CRC5/CRC16 check (a data packet with a bad CRC but a clean bit stream is still
+  ACKed), no address or endpoint match, no data-toggle tracking, IN is always NAKed. It demonstrates that the
+  engine can meet a turnaround window on its own; it is not a USB function.
+* **Verification:** 10 ISS tests in `sw/tests/test_usb_device_ack.py`; negative controls (padding moved out of the
+  window, the ERR check removed, the partial-byte check removed, the J wait removed) each make tests fail. Five
+  lockstep scenarios `usb_dev_*` in `test/ttpe_scenarios.py` pass their checks on the ISS; **their RTL lockstep run
+  has not been done** (no HDL simulator in the authoring environment).
