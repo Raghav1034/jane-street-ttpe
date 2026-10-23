@@ -48,6 +48,7 @@ so pin changes land on exact clock cycles. New protocols are firmware, not new s
 | `i2c_master.asm` | SCL `uio[2]`, SDA `uio[3]` (open drain) | 100 / 400 kHz, clock stretching, NACK -> `uo[7]` + STOP, repeated START via `n[7]` |
 | `usb_rx.asm` | D+ `uio[6]`, D- `uio[7]`; `ui_in[7:4]` = TICK/DATA/STOP/ERR; `uo[6]` packet end, `uo[5]` bad packet | needs `MODE[0] = 1`; hardware bit slicer `ttpe_usb_rx` (30 flops) + software framing |
 | `usb_tx.asm` | D+ `uio[6]`, D- `uio[7]` | software only; host supplies PID, payload and CRC |
+| `usb_device_ack.asm` | D+ `uio[6]`, D- `uio[7]`; as `usb_rx.asm` | needs `MODE[0] = 1`; answers DATA0/DATA1 with ACK and IN with NAK 140 cycles after the host's SE0 ends; no CRC/address check (demonstrator) |
 
 I2C register read: push `A0 81 REG A1 n` into the TX FIFO (write address, count with Sr flag, register, read
 address, read count); the data arrives in the RX FIFO. The count byte `n` is `n[7]` = repeated-START flag and `n[6:0]`
@@ -88,7 +89,7 @@ and the program idles D+ low / D- high only while it drives them. The TX FIFO mu
 
 Simulation only; nothing was measured on silicon.
 
-* Python model (ISS) with 121 unit and protocol tests; the Execution Unit RTL runs cycle-for-cycle against it in
+* Python model (ISS) with 138 unit and protocol tests; the Execution Unit RTL runs cycle-for-cycle against it in
   cocotb lockstep (`make -C test TARGET=core`), plus chip-pin tests (`TARGET=top`) and the USB slicer against its
   model (`TARGET=usb`); gate-level simulation and the physical flow (DRC, LVS, precheck) run in CI.
 * The USB signalling conventions (SYNC, NRZI, stuffing, EOP, tolerances) come from the author's memory of the

@@ -835,6 +835,95 @@ def usb_tx():
     ]
 
 
+def usb_dev_levels(pkt):
+    lv, st = U.encode_levels(pkt)
+    return list(lv), st
+
+
+def usb_dev_wave(level_lists, eop=66, gap=1000, lead=300):
+    """Host waveform from explicit per-cell level lists (33.33 cycles per cell), SE0 eop cycles, J gap."""
+    dp, dm = [0] * lead, [1] * lead
+    for lv in level_lists:
+        for i, l in enumerate(lv):
+            w = round((i + 1) * 100 / 3) - round(i * 100 / 3)
+            dp += [l] * w
+            dm += [1 - l] * w
+        dp += [0] * eop
+        dm += [0] * eop
+        dp += [0] * gap
+        dm += [1] * gap
+    return dp, dm
+
+
+def usb_dev_ends(dp, dm):
+    """[(se0_start, j_return)] of every real host EOP (SE0 run >= 40 cycles)."""
+    out = []
+    for k in range(1, len(dp)):
+        if dp[k] == 0 and dm[k] == 0 and not (dp[k - 1] == 0 and dm[k - 1] == 0):
+            j = next(i for i in range(k, len(dm)) if dm[i] == 1)
+            if j - k >= 40:
+                out.append((k, j))
+    return out
+
+
+def scn_usb_device_ack(name, dp, dm, rx_bytes, responses, bad=0):
+    """usb_device_ack.asm on the core with the slicer connected and a closed-loop bus (the chip's own
+    transmission is read back through the pads).  responses[i] = bytes the chip must answer after host
+    packet i (None = silence).  Checks: all host bytes received, response waveform equal to
+    usb_ls.tx_expected, first K edge 140 cycles after the end of the host SE0 (inside the relayed
+    2..6.5 bit-time window, and still inside it measured from the end of the J bit), one uo6 toggle per host
+    packet, `bad` toggles on uo5."""
+    world = W.UsbHostDevBus(dp, dm)
+
+    def check(ls):
+        assert not ls.iss.illegal
+        assert ls.rx_got == rx_bytes, (ls.rx_got, rx_bytes)
+        ends = usb_dev_ends(dp, dm)
+        assert len(ends) == len(responses), (len(ends), len(responses))
+        p, m = world.levels(6), world.levels(7)
+        for (_, j), resp in zip(ends, responses):
+            k = next((i for i in range(j, min(j + 700, len(p))) if p[i] == 1), None)
+            if resp is None:
+                assert k is None, "unexpected response"
+                continue
+            assert k is not None, "no response"
+            assert k - j == 140, k - j
+            assert 67 <= k - j - 33 and k - j <= 216
+            ep, em = U.tx_expected(resp)
+            assert p[k:k + len(ep)] == ep and m[k:k + len(em)] == em, "response waveform differs"
+        assert usb_toggles(ls, 6) == len(responses), usb_toggles(ls, 6)
+        assert usb_toggles(ls, 5) == bad, usb_toggles(ls, 5)
+    return Scenario("usb_dev_" + name, pad512(example("usb_device_ack.asm")), world,
+                    DefaultPolicy(), len(dp) + 400, check, usb_en=True)
+
+
+def usb_device_ack():
+    ack, nak = [0xD2], [0x5A]
+    pk = [U.data_packet("DATA0", [0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 0x40, 0x00]), U.token("IN", 3, 1),
+          U.token("SETUP", 0, 0), U.data_packet("DATA1", [0xFF] * 8), [U.pid_byte(U.PID["ACK"])],
+          U.token("OUT", 5, 2)]
+    exp = [ack, nak, None, ack, None, None]
+    flat = [b for q in pk for b in q]
+    dp, dm = U.waveform(pk, eop_cycles=66, gap_cycles=1000)
+    out = [scn_usb_device_ack("clean", dp, dm, flat, exp)]
+    dp, dm = U.waveform(pk, eop_cycles=62, gap_cycles=1000, ppm=15000, jitter=2, skew=3, seed=3)
+    out.append(scn_usb_device_ack("slow_jitter_eop62", dp, dm, flat, exp))
+    dp, dm = U.waveform(pk, eop_cycles=75, gap_cycles=1000, ppm=-15000, jitter=1, skew=2, seed=5)
+    out.append(scn_usb_device_ack("fast_skew_eop75", dp, dm, flat, exp))
+    good = usb_dev_levels(pk[0])[0]
+    lv, st = usb_dev_levels(U.data_packet("DATA0", [0xFC, 0x01]))
+    lv[st[0]] = lv[st[0] - 1]                         # stuff violation exactly at a byte boundary
+    part = usb_dev_levels(pk[0])[0][:-3]              # last byte cut after 5 bits
+    dp, dm = usb_dev_wave([lv, good, part, good])
+    # the bad packets push the bytes that completed before the error: C3 FC, and all but the last byte of DATA0
+    out.append(scn_usb_device_ack("bad_then_good", dp, dm, [0xC3, 0xFC] + pk[0] + pk[0][:-1] + pk[0],
+                                  [None, ack, None, ack], bad=2))
+    resp_len = len(U.tx_expected(ack)[0])
+    dp, dm = U.waveform([pk[0], pk[3], pk[0]], gap_cycles=140 + resp_len + 20)
+    out.append(scn_usb_device_ack("back_to_back", dp, dm, [b for q in (pk[0], pk[3], pk[0]) for b in q], [ack, ack, ack]))
+    return out
+
+
 def usb():
     return [
         scn_usb_packets("clean", 0),
@@ -844,7 +933,7 @@ def usb():
         scn_usb_glitch(1), scn_usb_glitch(2), scn_usb_glitch(3),
         scn_usb_enable_midrun(),
         scn_usb_disabled_passthrough(),
-    ]
+    ] + usb_device_ack()
 
 
 # ------------------------------------------------------------------ registry

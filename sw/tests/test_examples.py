@@ -428,7 +428,8 @@ class AllExamples(unittest.TestCase):
         sizes = {fn: sum(load(fn).used) for fn in sorted(os.listdir(EX_DIR)) if fn.endswith(".asm")}
         self.assertEqual(set(sizes), {"uart_tx.asm", "uart_rx.asm", "spi_master.asm", "i2c_master.asm",
                                     "usb_rx.asm",    # usb_rx: needs the ttpe_usb_rx primitive (MODE[0] = 1)
-                                    "usb_tx.asm"})   # usb_tx: software only, D+ = uio6, D- = uio7
+                                    "usb_tx.asm",    # usb_tx: software only, D+ = uio6, D- = uio7
+                                    "usb_device_ack.asm"})   # usb_rx + usb_tx halves, autonomous ACK/NAK
         for fn, n in sizes.items():
             self.assertLess(n, 128, "%s uses %d words" % (fn, n))
 

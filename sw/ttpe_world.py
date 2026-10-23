@@ -341,3 +341,24 @@ class UsbTxBus(BusWorld):
         self.last_pad = pad
         self.pad_log[-1] = pad
         return pad, ui
+
+
+class UsbHostDevBus(BusWorld):
+    """Low-speed USB bus with a scripted host (per-cycle D+/D- lists, J beyond the lists) and the chip as
+    the device on D+ = uio6, D- = uio7.  While the chip drives a line (uio_oe set) the chip's value wins,
+    otherwise the host's value is on the wire (host idle = J = D+ 0, D- 1), so a released chip reads back
+    exactly what the host or the pull resistors put there, including the chip's own transmission.
+    uio0..5 behave as in BusWorld without devices.  pad_log / levels() give the per-cycle line levels."""
+
+    def __init__(self, dp, dm, ui=0xFF):
+        super().__init__([], ui)
+        self.dp, self.dm = dp, dm
+
+    def pads(self, k, uio_oe, uio_out, uo_out):
+        hp, hm = (self.dp[k], self.dm[k]) if k < len(self.dp) else (0, 1)
+        p = (uio_out >> 6) & 1 if uio_oe & 0x40 else hp
+        m = (uio_out >> 7) & 1 if uio_oe & 0x80 else hm
+        pad = (~(uio_oe & ~uio_out) & 0x3F) | (p << 6) | (m << 7)
+        self.last_pad = pad
+        self.pad_log.append(pad)
+        return pad, self.ui

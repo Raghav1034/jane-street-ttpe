@@ -308,7 +308,7 @@ Level 3| Core Lockstep Co-Sim vs ISS (57 scenarios)         |
        +---------------------------------------------------+
 Level 2| SRAM Controller & Memory Tests (test_ttpe_mem.py)  |
        +---------------------------------------------------+
-Level 1| Instruction Set Simulator & Unit Tests (121 tests) |
+Level 1| Instruction Set Simulator & Unit Tests (138 tests) |
        +---------------------------------------------------+
 ```
 
@@ -316,11 +316,11 @@ Level 1| Instruction Set Simulator & Unit Tests (121 tests) |
 
 1. **Software Reference Model (`sw/ttpe_iss.py`):**
    - Pure Python cycle-exact instruction set simulator.
-   - 121 unit tests in `sw/tests/` (including the USB model, USB TX loopback, I2C repeated START and the host driver) verifying opcode behavior, register transfers, timing deltas, and edge-detect timing.
+   - 138 unit tests in `sw/tests/` (including the USB model, USB TX loopback, I2C repeated START and the host driver) verifying opcode behavior, register transfers, timing deltas, and edge-detect timing.
 2. **SRAM Subsystem Verification (`test/test_ttpe_mem.py`):**
    - 18 cocotb testcases validating memory arbitration, host read/write latency, pipeline hold, flush, and wrap.
 3. **Core Lockstep Co-Simulation (`test/test_ttpe_core.py`):**
-   - 57 lockstep scenarios (60 cocotb tests in total), including 9 low-speed USB receive, 3 USB transmit and 2 I2C repeated-START scenarios.
+   - 57 lockstep scenarios (60 cocotb tests in total) in the last RTL run, including 9 low-speed USB receive, 3 USB transmit and 2 I2C repeated-START scenarios. Five `usb_dev_*` scenarios (autonomous ACK/NAK, below) were added afterwards and have only been run on the ISS: their RTL lockstep run is pending (`make -C test TARGET=core`).
    - Compares the SystemVerilog RTL cycle-by-cycle against `ttpe_iss.py` in lockstep.
    - Tested against 28 injected hardware mutants (all caught; this mutation run predates the USB block and was not repeated for it).
 4. **Chip Top Pin Verification (`test/test_ttpe_top.py`):**
@@ -399,6 +399,10 @@ All example protocols have been verified cycle-for-cycle against physical specif
    - Host pushes `n` then `n` bytes (PID + payload + CRC, already formed); the program sends SYNC, NRZI/bit-stuffed data LSB first on D+ = `uio[6]`, D- = `uio[7]` (push-pull, released afterwards), then SE0 for 2 bit times and J for 1. Cells are 33/34 cycles (266 cycles per byte, -0.25% vs 1.5 Mb/s). 72 words, no RTL change.
    - The waveform is checked cycle for cycle against `sw/usb_ls.py` and looped back through the `ttpe_usb_rx` model and `usb_rx.asm` for ACK, NAK, SETUP, DATA0 and an all-0xFF DATA1.
    - **Limits:** CRC must come from the host (three registers cannot hold a CRC16); the TX FIFO must stay ahead of the wire (a late byte stretches the line); no turnaround or response logic; electrical levels, pull-ups and series resistors are external and unverified; checked in simulation only.
+7. **`usb_device_ack.asm` (autonomous USB handshake, software only):**
+   - Receive with the `ttpe_usb_rx` slicer (`MODE[0]` = 1), push every byte to the RX FIFO, wait for the host's SE0 to end (`WAIT high uio7`), then answer DATA0/DATA1 with ACK and IN with NAK on the engine itself; anything else, and any packet with a stuff violation or a partial last byte (flagged on `uo[5]`), gets no response. 124 words, no RTL change.
+   - Measured on the ISS with a closed-loop bus (the chip reads back its own transmission): the first K edge of the response is exactly 140 cycles (4.2 bit times) after the end of the host SE0 on every path, for host SE0 widths of 62..75 cycles and +-1.5% host rate. The turnaround window used for the assertion, 2 to 6.5 bit times (67..216 cycles), was relayed to us and has not been checked against the specification text; 140 also fits when measured from the end of the J bit that follows the SE0 (107 cycles).
+   - **Limits:** a turnaround demonstrator, not a compliant device: no CRC5/CRC16 check, no address/endpoint match, no data-toggle tracking, always NAK on IN. Only a bit-stuff violation or a partial byte stops the ACK. RTL lockstep for its five scenarios is pending.
 
 ---
 
@@ -434,8 +438,8 @@ jane-street-ttpe/
 │   ├── ttpe_usb_rx.sv      # Low-speed USB receive bit slicer (NRZI, unstuff, SYNC/EOP), behind MODE[0]
 │   └── ttpe_sram_ctrl.sv   # Deterministic 3-stage SRAM memory arbiter
 ├── sw/
-│   ├── examples/           # Assembly programs: uart_tx, uart_rx, spi_master, i2c_master, usb_rx, usb_tx
-│   ├── tests/              # 121 Python ISA, ISS, USB, I2C and host-driver unit tests
+│   ├── examples/           # Assembly programs: uart_tx, uart_rx, spi_master, i2c_master, usb_rx, usb_tx, usb_device_ack
+│   ├── tests/              # 138 Python ISA, ISS, USB, I2C and host-driver unit tests
 │   ├── ttpe_asm.py         # Complete macro assembler
 │   ├── ttpe_isa.py         # Canonical source of truth for instruction encodings
 │   ├── ttpe_iss.py         # Cycle-exact Instruction Set Simulator (ISS)
@@ -466,7 +470,7 @@ python3 -m unittest discover -s sw/tests -v
 
 Assemble all six example programs into `sw/build/` (`.hex` for `$readmemh`, `.bin`, and `.py` = `PROGRAM = [...]` for the host):
 ```bash
-make -C sw images                       # uart_tx uart_rx spi_master i2c_master usb_rx usb_tx
+make -C sw images                       # uart_tx uart_rx spi_master i2c_master usb_rx usb_tx usb_device_ack
 make -C sw images ASMFLAGS="-D BIT=100" # extra assembler options (-D NAME=VALUE) for every program
 ```
 
@@ -597,7 +601,7 @@ During the USB phase, the AI environment did not have access to an HDL simulator
 4. *Primitive against its specification.* The USB bit slicer `ttpe_usb_rx` is compared per cycle with its Python model (`TARGET=usb`, about 82k fuzz cycles), plus an independent decode of its outputs back to packet bits; the transmit program is checked cycle for cycle against `usb_ls.tx_expected` and looped back through the receive model and `usb_rx.asm`.
 5. *Gate level and physical.* The same top-level tests run on the synthesised netlist in CI (`gl_test`), with the LibreLane flow, DRC, LVS and the Tiny Tapeout precheck. Power-grid alignment of the IHP SRAM macro is described in section 8.
 
-**Evidence and its limits.** Python suite: 121 tests. RTL: 84 cocotb tests (8 + 60 + 16) as reported by the engineer after the final changes; GDS, precheck, `gl_test` and viewer jobs green in CI. Not covered, and listed with severity in `docs/PHASE_E_REPORT.md`: models, RTL and tests share one author, so a shared misreading would pass every test; the USB signalling conventions and tolerances are from memory and were never checked against a real host or captured trace; pad electricals, pull-ups and USB thresholds are unverified; nothing has run on silicon. The CI log shows Max Slew / Max Cap warnings and 874 hold buffers that have not been compared with an earlier run.
+**Evidence and its limits.** Python suite: 138 tests, including independent USB vectors (SETUP, DATA0, ACK as literal line levels) and the closed-loop USB handshake tests. RTL: 84 cocotb tests (8 + 60 + 16) as reported by the engineer before the `usb_dev_*` scenarios were added; those five are ISS-checked only until the lockstep run is repeated. GDS, precheck, `gl_test` and viewer jobs green in CI as of the last merged commit. Not covered, and listed with severity in `docs/PHASE_E_REPORT.md`: models, RTL and tests share one author, so a shared misreading would pass every test; the USB conventions were cross-checked in part against public sources (J/K polarity, six-ones stuffing, +-1.5% rate, 1.25-1.50 us EOP, D- pull-up; table in `docs/USB_LS_RX.md` section 7) but the turnaround window and receiver acceptance widths were not, and nothing was checked against a real host or captured trace; pad electricals, pull-ups and USB thresholds are unverified; nothing has run on silicon. The CI log shows Max Slew / Max Cap warnings and 874 hold buffers that have not been compared with an earlier run.
 
 Reproduce: `python3 -I -m unittest discover -s sw/tests -v`, `make -C test regress` (needs Icarus Verilog and cocotb), `make -C sw images`.
 
