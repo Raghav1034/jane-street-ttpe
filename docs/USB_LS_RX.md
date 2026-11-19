@@ -1,13 +1,13 @@
 # Low-speed USB receive on the TTPE: cycle budget and `ttpe_usb_rx` primitive (Phase D)
 
-Status: **RTL simulated (79/79), synthesised, placed, routed and gate-level tested; not tested on real USB.**
-RTL simulation (Icarus 12.0, cocotb 2.1.0, run by the project author): `TARGET=usb` 8/8, `TARGET=core` 55/55,
-`TARGET=top` 16/16. Physical flow: GitHub Actions on `dev/protocol-continuation` (commit `ba2e07b`), as reported by the project author: `gds` (LibreLane 3.1.0.dev3, ihp-sg13cmos5l), `precheck` (DRC/LVS/antenna/manifest), `gl_test` (all 16 `test_ttpe_top` tests on the synthesized gate-level netlist, including `t_usb_rx_e2e`, `t_usb_mode_register`, `t_usb_disabled_passthrough`) and `viewer` all passed. The authoring session saw the CI summary,
+Status: **RTL simulated (107/107 cocotb; 89/89 usb+core+top, maintainer-reported, not re-run in this review), synthesised, placed, routed and functional gate-level tested at 6x4 (raw CI log not verified in this review; 8x4 pending); not tested on real USB.**
+RTL simulation (Icarus + cocotb, maintainer-reported baseline, local `test/results_core_pdk.xml` dated 2026-10-23): `TARGET=usb` 8/8, `TARGET=core` 65/65 (62 scenarios + 3 harness tests, incl. 5 `usb_dev_*`),
+`TARGET=top` 16/16, `TARGET=mem` 18/18. Physical flow: GitHub Actions on `dev/protocol-continuation` (commit `ba2e07b`, 6x4 tile), as reported by the project author (raw CI log not verified in this review): `gds` (LibreLane 3.1.0.dev3, ihp-sg13cmos5l), `precheck` (DRC/LVS/antenna/manifest), `gl_test` (functional `-DFUNCTIONAL` gate-level run of all 16 `test_ttpe_top` tests on the post-P&R netlist, not SDF-timed, including `t_usb_rx_e2e`, `t_usb_mode_register`, `t_usb_disabled_passthrough`) and `viewer` all passed. The authoring session saw the CI summary,
 not the raw logs; the cell count, area, WNS/TNS and congestion numbers have not been compared against baseline
 `d8bffd4` yet (see `PHASE_E_REPORT.md` 1.5). `gl_test` runs only the top-level tests, on one set of vectors: it is
 evidence that synthesis kept the tested behaviour, not a formal equivalence proof.
 Everything called "measured" below was produced by the Python reference model (`sw/usb_ls.py`) running against the
-cycle-accurate ISS (`sw/ttpe_iss.py`): `python3 -m unittest discover -s sw/tests` (87 tests). The USB signalling
+cycle-accurate ISS (`sw/ttpe_iss.py`): `python3 -I -m unittest discover -s sw/tests` (138/138 tests). The USB signalling
 conventions come from the author's memory of the specification and no real USB capture has been replayed.
 ISA v0.2 is unchanged; with MODE.usb_en = 0 (reset value) the design behaves as before.
 
@@ -226,7 +226,7 @@ here return only front matter and the table of contents. What was checked, and a
 |---|---|---|---|
 | Low-speed J / K / SE0 | idle J = D+ 0, D- 1; K = D+ 1, D- 0; SE0 = both 0 | comments in an open-source logic-analyzer USB decoder ("Low-speed: DP=1,DM=0 is K, DP=0,DM=1 is J") | confirmed by an independent source |
 | Pull-up | device pull-up on D- for low speed | Beyond Logic "USB in a NutShell" (Figure 3 caption) | confirmed |
-| Bit rate and tolerance | 1.5 Mb/s +-1.5 % (+-15,000 ppm); TX is 0.25 % slow | Beyond Logic: "1.50Mb/s with a data signalling tolerance of +-1.5%"; RX tested at +-15,000 ppm | confirmed |
+| Bit rate and tolerance | 1.5 Mb/s +-1.5 % (+-15,000 ppm); TX is +0.25 % fast (266 vs 266.67 cycles/byte = 1.50376 Mb/s) | Beyond Logic: "1.50Mb/s with a data signalling tolerance of +-1.5%"; RX tested at +-15,000 ppm | confirmed |
 | Bit stuffing | a 0 after six consecutive 1s | same open-source decoder; Figure 7-33 "Extra Bit Preceding EOP" exists in the spec's figure list (matches the stuffed 0 that `usb_tx.asm` sends after a packet ending in six 1s) | confirmed (rule); spec text not read |
 | EOP | SE0 for two bit intervals, then J; low-speed source width 1.25 .. 1.50 us | open-source decoder comment ("1.25uS - 1.50uS" low speed). `usb_tx.asm`: SE0 66 cycles = 1.32 us, then J 33 cycles | confirmed (source width); receiver acceptance widths not checked |
 | SYNC and NRZI | SYNC = KJKJKJKK, 0 = transition, LSB first | consistent with the supplied SETUP/ACK line-level tables, which were re-derived by hand (7.2); spec text not read | consistent, not independently sourced |
@@ -243,7 +243,7 @@ provenance is relayed), and both were re-derived by hand from NRZI and agree. Th
 separate throw-away code and frozen as a literal; its CRC16 0x94DD equals the value in the supplied table. This
 shows that the model and firmware agree with these vectors, not that a real host would accept our transmissions.
 
-### 7.3 Autonomous handshake: `sw/examples/usb_device_ack.asm` (124 words)
+### 7.3 Autonomous handshake: `sw/examples/usb_device_ack.asm` (123 words)
 
 Receive as in `usb_rx.asm` (the PID byte is also kept in `C0`), on packet end flag it (`uo6`, `uo5`), reject it on
 a stuff violation (`ui7`) or a partial last byte (`c1 != 8`), otherwise `WAIT high uio7` (D- back to J = end of
@@ -262,6 +262,7 @@ NAK, anything else with nothing. The response reuses the `usb_tx.asm` bit loop w
   ACKed), no address or endpoint match, no data-toggle tracking, IN is always NAKed. It demonstrates that the
   engine can meet a turnaround window on its own; it is not a USB function.
 * **Verification:** 10 ISS tests in `sw/tests/test_usb_device_ack.py`; negative controls (padding moved out of the
-  window, the ERR check removed, the partial-byte check removed, the J wait removed) each make tests fail. Five
-  lockstep scenarios `usb_dev_*` in `test/ttpe_scenarios.py` pass their checks on the ISS; **their RTL lockstep run
-  has not been done** (no HDL simulator in the authoring environment).
+  window, the ERR check removed, the partial-byte check removed, the J wait removed) each make tests fail. All five
+  lockstep scenarios `usb_dev_*` in `test/ttpe_scenarios.py` are included in the 65/65 `TARGET=core` run (62 scenarios +
+  3 harness tests) reported by the maintainer (local `test/results_core_pdk.xml` dated 2026-10-23, not re-run in this
+  review).

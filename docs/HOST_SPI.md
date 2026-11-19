@@ -231,10 +231,9 @@ open("prog.bin", "wb").write(struct.pack("<%dI" % len(words), *words))
 
 | What | Status |
 |---|---|
-| `test/test_ttpe_top.py` (13 chip-level tests, pins only) on the real RTL under Icarus + cocotb | **Not run by the author** (no simulator in the authoring sandbox). Run `make TARGET=top` in `test/`. |
-| Same test code (`test/ttpe_top_tb.py`) against a line-by-line Python transcription of the new RTL (`ttpe_spi_phy`, `ttpe_host_spi`, `ttpe_reset_sync`, `tt_um_ttpe` glue, halt / core_reset) | 13 / 13 pass. 25 injected faults in the transcription were run against it (FIFO pop timing, address auto-increment, error flags, halt / core_reset effects, MISO mux, MOSI alignment, status bits, prefetch, ...): 21 are caught, 4 survive and are equivalent at the pins (halt gating of `instr_accept`, a redundant `widx` reset at cs_fall, the `PC_HI` mask above bit 0, and the `ld_real` race below, which needs an HPUSH inside a 7-cycle window). This checks the logic and the testbench, **not the Verilog text**. |
-| Core lockstep (`test_ttpe_core.py`) against the transcription after the halt / core_reset change | 43 / 43 pass (the new ports are tied to 0 there). |
-| Synthesis, area, timing, gate-level simulation | Not run. No numbers are claimed. |
+| `test/test_ttpe_top.py` (16 chip-level tests, pins only) on the real RTL under Icarus + cocotb | 16/16 reported passing by the maintainer (`make -C test TARGET=top`, not re-run in this review). |
+| Core lockstep (`test/test_ttpe_core.py`) | 65/65 (62 scenarios + 3 harness tests) reported passing by the maintainer (local `test/results_core_pdk.xml` dated 2026-10-23, not re-run in this review). |
+| Synthesis, area, timing, gate-level simulation | Hardened at 6x4 in CI (author-reported `gds`, `precheck`, functional `gl_test` 16/16 with `-DFUNCTIONAL`, not SDF-timed, on `dev/protocol-continuation`; not verified in this review); 8x4 re-hardening pending (see `docs/PHASE_E_REPORT.md` 1.7). |
 
 ## Not covered / assumptions to confirm
 

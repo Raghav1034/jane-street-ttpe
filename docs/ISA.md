@@ -2,10 +2,10 @@
 
 Status: draft for review. Not frozen until the Execution Unit RTL has been cross-checked against the
 reference model (`sw/ttpe_iss.py`). Source of truth for all encodings: `sw/ttpe_isa.py`.
-The SystemVerilog package `rtl/ttpe_isa_pkg.sv` is generated from it
-(`python3 sw/ttpe_isa.py --gen-sv > rtl/ttpe_isa_pkg.sv`); a test fails if it goes stale.
+The SystemVerilog package `src/ttpe_isa_pkg.sv` is generated from it
+(`python3 sw/ttpe_isa.py --gen-sv > src/ttpe_isa_pkg.sv`); `sw/tests/test_isa_asm.py` checks it.
 
-Every timing statement below is checked cycle-exactly by `sw/tests` (71 tests). Cycle numbers are
+Every timing statement below is checked cycle-exactly by `sw/tests` (138 tests, `python -I -m unittest discover -s sw/tests`). Cycle numbers are
 integers; one cycle is 20 ns at 50 MHz.
 
 ## 1. Architectural state
@@ -62,7 +62,7 @@ Reserved bits in `A`/`P` are ignored by the reference model and are always emitt
 
 ## 3. Execution timing (the contract for the Execution Unit RTL)
 
-The fetch controller (`rtl/ttpe_sram_ctrl.sv`, verified in simulation) presents instructions with these facts:
+The fetch controller (`src/ttpe_sram_ctrl.sv`, verified in simulation) presents instructions with these facts:
 
 * `core_run` asserted in cycle 0 -> first instruction valid in cycle 3.
 * Instruction accepted in cycle X -> next sequential instruction valid in cycle X+3.
@@ -133,20 +133,19 @@ All parameters are assembler `-D` values; every claim below is asserted in `sw/t
 | `i2c_master.asm` | `TL`, `TH` (SCL low/high cycles), `DSH` | Write, read (last byte NACKed), address NACK -> error flag `uo7` + STOP, clock stretching. **Repeated START:** count byte `n[7] = 1` ends the transaction without STOP (bus held: SCL low, SDA released) and the next command byte starts with a repeated START (SCL low >= `TL`, tSU;STA = tHD;STA = exactly `TH`); `n[6:0]` is the byte count (0 = 256), so counts 128..255 are no longer expressible. Register read = host bytes `A0 81 REG A1 n`. SCL high exactly `TH`, low exactly `TL` inside a byte (longer between bytes). 100 kHz (`TL=TH=250`) and 400 kHz (`TL=75, TH=50`) meet the I2C minimum low/high times. |
 | `usb_rx.asm` | none (needs MODE[0] = 1: `ttpe_usb_rx` virtual pins ui4..ui7) | Hybrid low-speed USB receive, see `USB_LS_RX.md`. |
 | `usb_tx.asm` | `EXT2`, `EXT5` (extra cycle after bit 2 / 5, default 1) | Low-speed USB transmit on D+ = `uio6`, D- = `uio7`, software only: host pushes `n, PID, payload/CRC...`; SYNC, NRZI (`PINS toggle` on 0 bits), bit stuffing (`C0` countdown), EOP (SE0 66 cycles, J 33, release). Cells 33/34 cycles (266 per byte), waveform checked cycle for cycle against `usb_ls.tx_expected`, loopback through `ttpe_usb_rx` model and `usb_rx.asm`. 72 words. CRC must be supplied by the host; FIFO must stay ahead of the wire (HPULL deadline = its commit cycle). |
-| `usb_device_ack.asm` | `EXT2`, `EXT5`, `PAD_D0`/`PAD_D1`/`PAD_IN` (turnaround padding per path, defaults 76/58/46) | Autonomous USB handshake (needs `MODE[0]` = 1): receive as `usb_rx.asm` (PID kept in `C0`), `WAIT high uio7` for the end of the host SE0, answer DATA0/DATA1 with ACK (0xD2) and IN with NAK (0x5A) using the `usb_tx.asm` byte loop; first K edge 140 cycles after the end of the host SE0 on every path. No CRC/address/toggle check; bad packets (stuff error, partial byte) get no response. 124 words. |
+| `usb_device_ack.asm` | `EXT2`, `EXT5`, `PAD_D0`/`PAD_D1`/`PAD_IN` (turnaround padding per path, defaults 76/58/46) | Autonomous USB handshake (needs `MODE[0]` = 1): receive as `usb_rx.asm` (PID kept in `C0`), `WAIT high uio7` for the end of the host SE0, answer DATA0/DATA1 with ACK (0xD2) and IN with NAK (0x5A) using the `usb_tx.asm` byte loop; first K edge 140 cycles after the end of the host SE0 on every path. No CRC/address/toggle check; bad packets (stuff error, partial byte) get no response. 123 words. |
 
 Known limitations: I2C has no multi-master arbitration and no 10-bit addressing, and `n` values 128..255 now mean
 "count `n & 0x7F` with repeated START" (the count byte is no longer a plain 0..255 count); an aborted I2C write leaves its remaining
-bytes in the host TX FIFO until a flush control exists.
+bytes in the host TX FIFO until the host pulses `CTRL.tx_flush` (register `0x02` bit 2).
 
 ## 7. Verification status
 
-* 138 unit and protocol tests (including USB receive/transmit and I2C repeated START), standard library only: `python3 -m unittest discover -s sw/tests -v`.
-* Fault injection: shortening the modelled fetch latency, a one-cycle-late UART sample, an off-by-one SPI sample
-  delta and a missing synchroniser stage were each caught by the tests.
-* The Execution Unit RTL exists and is compared cycle by cycle with this model in cocotb lockstep (`make -C test TARGET=core`,
-  60 tests, 57 lockstep scenarios), at the chip pins (`TARGET=top`, 16 tests) and on the gate-level netlist in CI (`gl_test`).
-  Results are as reported by the project author. Nothing has run on silicon.
+* 138 unit and protocol tests (including USB receive/transmit, autonomous ACK and I2C repeated START), standard library only: `python3 -I -m unittest discover -s sw/tests -v`.
+* Fault injection: firmware/model mutation harness `sw/mutants_fw.py` (76/93 killed, 17 survived on the 138-test baseline).
+* The Execution Unit RTL is compared cycle by cycle with this model in cocotb lockstep (`make -C test TARGET=core`:
+  65/65 tests = 62 scenarios + 3 harness tests, including the 5 `usb_dev_*` scenarios), plus memory (`TARGET=mem`, 18), USB slicer (`TARGET=usb`, 8), chip-pin (`TARGET=top`, 16) — 107 cocotb tests total (245 with Python) as reported by the maintainer (local `test/results_core_pdk.xml` dated 2026-10-23, not re-run in this review) — and functional gate-level simulation (`gl_test`, `-DGL_TEST -DFUNCTIONAL`, not SDF-timed) in CI at 6x4 (author-reported on `dev/protocol-continuation`, not verified in this review; 8x4 pending).
+  Nothing has run on silicon.
 
 ## 8. Open items
 

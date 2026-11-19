@@ -1,18 +1,18 @@
 # TTPE Execution Unit, FIFOs and core wrapper (RTL v0.2)
 
-ISA v0.2 is frozen (`docs/ISA.md`, `sw/ttpe_isa.py`, `rtl/ttpe_isa_pkg.sv`). This file documents the RTL that
+ISA v0.2 is frozen (`docs/ISA.md`, `sw/ttpe_isa.py`, `src/ttpe_isa_pkg.sv`). This file documents the RTL that
 implements it. Nothing here changes the ISA.
 
 ## Files
 
 | File | Role |
 |---|---|
-| `rtl/ttpe_input_sync.sv` | 2-FF synchroniser for `{ui_in, uio_in}` plus one delay stage for edge detection |
-| `rtl/ttpe_fifo.sv` | 8 x 8 synchronous FIFO, first-word-fall-through, flush, saturating drop counter |
-| `rtl/ttpe_exec.sv` | Execution Unit (accept / delta countdown / commit / branch / pins / registers) |
-| `rtl/ttpe_core.sv` | `ttpe_mem_subsys` + `ttpe_exec` + TX/RX FIFOs + host run control |
-| `rtl/sram_512x32_bb.v` | Synthesis black box of the SRAM macro, active only without `-DSIM` |
-| `rtl/ttpe_reset_sync.sv`, `rtl/ttpe_spi_phy.sv`, `rtl/ttpe_host_spi.sv`, `rtl/tt_um_ttpe.sv` | Chip level: reset synchroniser, host SPI slave, register map, Tiny Tapeout top. See `docs/HOST_SPI.md` |
+| `src/ttpe_input_sync.sv` | 2-FF synchroniser for `{ui_in, uio_in}` plus one delay stage for edge detection |
+| `src/ttpe_fifo.sv` | 8 x 8 synchronous FIFO, first-word-fall-through, flush, saturating drop counter |
+| `src/ttpe_exec.sv` | Execution Unit (accept / delta countdown / commit / branch / pins / registers) |
+| `src/ttpe_core.sv` | `ttpe_mem_subsys` + `ttpe_exec` + TX/RX FIFOs + host run control |
+| `src/sram_512x32_bb.v` | Synthesis black box of the SRAM macro, active only without `-DSIM` |
+| `src/ttpe_reset_sync.sv`, `src/ttpe_spi_phy.sv`, `src/ttpe_host_spi.sv`, `src/tt_um_ttpe.sv` | Chip level: reset synchroniser, host SPI slave, register map, Tiny Tapeout top. See `docs/HOST_SPI.md` |
 
 ## Timing contract implemented (identical to `sw/ttpe_iss.py`)
 
@@ -42,14 +42,13 @@ All inputs are sampled at the edge that ends the cycle in which they are applied
 2. **The synchroniser free-runs from reset.** The ISS starts it at 0 when the core starts. The first instruction can commit no earlier than cycle 4, by which time both hold the same real pad history, so no program can tell them apart. In RTL a pad that is high at reset does not create the spurious rising edge that `docs/ISA.md` section 4 warns about.
 3. The ISS has no flush and no host pop. The testbench models both on the ISS side (see `test/ttpe_lockstep.py`).
 
-## Verification status (read this before trusting it)
+## Verification status
 
 | What | Status |
 |---|---|
-| `test/ttpe_lockstep.py` + `test/ttpe_scenarios.py` against a Python transcription of the RTL | 43 scenarios pass in the authoring sandbox. This checks the logic and the testbench, **not the Verilog**. 28 injected faults in the transcription (accept gating, off-by-one delta, WAIT edge swap, synchroniser depth, FIFO full/flush, page bit, host gating, ...) are all caught; the one survivor is a deliberate equivalent mutant. |
-| `test/test_ttpe_core.py` on the real RTL under Icarus + cocotb | **Not run by the author** (no simulator in the sandbox). Run `make regress` in `test/`. |
-| `sw/tests` | 71 tests pass (also with `-W error`). |
-| Synthesis, area, timing | Not run. No numbers are claimed. |
+| `test/test_ttpe_core.py` on the real RTL under Icarus + cocotb | 65/65 tests (62 scenarios + 3 harness tests) reported passing by the maintainer (local `test/results_core_pdk.xml` dated 2026-10-23, not re-run in this review). |
+| `sw/tests` | 138/138 tests pass (`python -I -m unittest discover -s sw/tests`); mutation harness `sw/mutants_fw.py`: 76/93 killed, 17 survived. |
+| Synthesis, area, timing | Hardened at 6x4 in CI (author-reported `gds`, `precheck`, functional `gl_test` 16/16 on `dev/protocol-continuation`, not verified in this review); 8x4 re-hardening and baseline comparison pending (see `docs/PHASE_E_REPORT.md` 1.7). |
 
 `ttpe_exec.sv` no longer uses constant bit-selects inside `always_comb` (named wires instead), which
 removes the Icarus "constant selects in always_* processes" messages. The `test_ttpe_core.py` tests tie

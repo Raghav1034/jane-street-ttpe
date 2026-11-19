@@ -12,7 +12,7 @@ TI PRU. A program of up to 512 32-bit instructions lives in an on-chip 512x32 SR
 it takes effect exactly `delta + 1` cycles after the previous one (minimum delta 2 for back-to-back execution),
 so pin changes land on exact clock cycles. New protocols are firmware, not new silicon.
 
-* **Clock:** 50 MHz target (20 ns cycle). The timing constants of the examples assume exactly 50 MHz.
+* **Clock & tile:** 50 MHz default (20 ns cycle; timing constants of the examples assume 50 MHz). Currently hardened at 6x4; migration to the confirmed 8x4 tile size is pending.
 * **ISA v0.2:** 4-bit opcode, 14 defined (`NOP PINS WAIT JMP JHI JLO SHOUT SAMPLE REG DJNZ HPUSH HPULL HALT JSB`), 2 reserved (trapped as illegal).
   Registers: 8-bit `SR`, two 8-bit counters `C0`, `C1`. 16 inputs through a 2-flop synchroniser, 16 outputs.
   A taken branch costs 3 extra cycles. Full reference: `docs/ISA.md`.
@@ -89,9 +89,7 @@ and the program idles D+ low / D- high only while it drives them. The TX FIFO mu
 
 Simulation only; nothing was measured on silicon.
 
-* Python model (ISS) with 138 unit and protocol tests; the Execution Unit RTL runs cycle-for-cycle against it in
-  cocotb lockstep (`make -C test TARGET=core`), plus chip-pin tests (`TARGET=top`) and the USB slicer against its
-  model (`TARGET=usb`); gate-level simulation and the physical flow (DRC, LVS, precheck) run in CI.
+* Python model (ISS) with 138/138 unit and protocol tests (`python3 -I -m unittest discover -s sw/tests -v`) and mutation harness `sw/mutants_fw.py` (76/93 killed, 17 survived); maintainer-reported cocotb RTL baseline (not re-run in this review; local `test/results_core_pdk.xml` dated 2026-10-23): 107/107 tests (`TARGET=mem` 18, `TARGET=core` 65 = 62 scenarios + 3 harness tests, `TARGET=top` 16, `TARGET=usb` 8; 245 total with Python); functional gate-level simulation (`gl_test`, `-DGL_TEST -DFUNCTIONAL`, not SDF-timed) and physical flow (DRC, LVS, precheck) reported passing in CI at 6x4 (raw CI log not verified in this review; 8x4 pending).
 * The USB signalling conventions (SYNC, NRZI, stuffing, EOP, tolerances) come from the author's memory of the
   specification and were checked only against the author's own model, never against a real host or a captured trace.
 * Known open items: the CI log shows Max Slew / Max Cap warnings and 874 inserted hold buffers (not compared to a
