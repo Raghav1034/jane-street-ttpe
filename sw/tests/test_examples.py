@@ -422,6 +422,45 @@ class I2cRepeatedStart(unittest.TestCase):
         self.assertEqual(set(w.levels(3)[-100:]), {1})
 
 
+    def test_clock_stretching_at_repeated_start_scl_rise(self):
+        """Slave holding SCL low at the repeated-START SCL rise must make the master wait before SDA falls (kills I9)."""
+        tl, th = 75, 50
+
+        class SrStretchSlave(W.I2cRegSlave):
+            def __init__(self, *args, sr_stretch=200, **kw):
+                super().__init__(*args, **kw)
+                self.sr_stretch = sr_stretch
+                self._armed = False
+
+            def step(self, k, pad_prev):
+                w0 = sum(len(x) for x in self.written)
+                low = super().step(k, pad_prev)
+                if sum(len(x) for x in self.written) != w0:
+                    self._armed = True
+                if self._armed and self.state == "wdata" and not self.sda_low and self.sr_stretch > 0:
+                    self.stretch_left = self.sr_stretch
+                    self.sr_stretch = 0
+                    self._armed = False
+                return low
+
+        s = SrStretchSlave(0x50, mem=self.MEM, sr_stretch=250)
+        w = W.BusWorld([s])
+        t = iss.Ttpe(load("i2c_master.asm", TL=tl, TH=th).image(),
+                     host_tx=[0xA0, 0x81, 0x05, 0xA1, 2], rx_depth=64)
+        t.run_cycles(w, 90 * (tl + th) + 6000)
+        self.assertEqual(s.events, ["S", "Sr", "P"])
+        self.assertEqual([b for _, b in t.rx], self.MEM[0x05:0x07])
+        st = self.bus_starts(w)
+        self.assertEqual(len(st), 2)
+        sr = st[1]
+        scl_ed = w.edges(2)
+        rise = max(c for c, lv in scl_ed if lv == 1 and c < sr)
+        fall_before = max(c for c, lv in scl_ed if lv == 0 and c < rise)
+        self.assertGreaterEqual(rise - fall_before, 250, "SCL stretched before Sr")
+        self.assertEqual(sr - rise, th, "tSU;STA = TH after stretched SCL release")
+        self.assertFalse(t.illegal)
+
+
 # ====================================================================== all examples
 class AllExamples(unittest.TestCase):
     def test_program_sizes(self):

@@ -182,7 +182,8 @@ mut("I11", X, "WRITE_BODY wl_h, hold", "WRITE_BODY wl_h, stop", "write with Sr f
 mut("I12", X, "READ_BODY rl_h, am_h, hold", "READ_BODY rl_h, am_h, stop", "read with Sr flag ends with STOP")
 mut("I13", X, "    JMP do_start @RS_SU", "    JMP cmd @RS_SU", "Sr re-enters at cmd (eats a second byte)")
 mut("I14", X, "    PINS low uo7 @2               ; clear error flag\n    MOV c1, sr @2\n    PINS float uio2 @RS_LOW",
-    "    NOP @2                        ; clear error flag\n    MOV c1, sr @2\n    PINS float uio2 @RS_LOW", "Sr does not clear the NACK flag")
+    "    NOP @2                        ; clear error flag\n    MOV c1, sr @2\n    PINS float uio2 @RS_LOW", "Sr does not clear the NACK flag",
+    equiv="CFG-equivalent: uo7 is cleared in init: and cmd:, set high only in nack: which always exits via stop: -> cmd:; hold: is reachable only from ACKed WRITE_BODY/READ_BODY, so uo7 is already 0 on every path into hold:")
 mut("I15", X, "    PINS float uio2 @RS_LOW       ; SCL rises; SDA is already released (high)",
     "    PINS float uio3 @RS_LOW       ; SCL rises; SDA is already released (high)", "Sr releases SDA instead of raising SCL")
 mut("I16", X, "    MOV c1, sr @2\n    PINS float uio2 @RS_LOW", "    NOP @2\n    PINS float uio2 @RS_LOW", "Sr loses the R/W bit (c1 stale)")

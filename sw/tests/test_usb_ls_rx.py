@@ -201,6 +201,18 @@ class OnEngine(unittest.TestCase):
         self.assertEqual(len(flags(t, 5)), 1)
         self.assertEqual([b for _, b in t.rx], pk[:3])
 
+    def test_stuff_error_at_byte_boundary_sets_flag(self):
+        """0xFC ends in six 1s, so the stuffed 0 sits on a byte boundary (c1 == 8): only JHI ui7 can catch it."""
+        pk = U.data_packet("DATA0", [0xFC, 0x01])
+        lv, st = U.encode_levels(pk)
+        lv = list(lv)
+        self.assertEqual((st[0] - 8) % 8, 0, "stuffed bit sits on a byte boundary")
+        lv[st[0]] = lv[st[0] - 1]
+        dp, dm = wave_from_levels(["".join(map(str, lv))], eop=66, gap=400, lead=300)
+        t, _ = run_usb(dp, dm)
+        self.assertEqual(len(flags(t, 6)), 1)
+        self.assertEqual(len(flags(t, 5)), 1)
+
     def test_negative_control_slow_loop_loses_data(self):
         with open(os.path.join(EX_DIR, "usb_rx.asm")) as f:
             src = f.read().replace("JHI ui6, pkt_end @2", "JHI ui6, pkt_end @30")
@@ -375,6 +387,135 @@ class IndependentVectors(unittest.TestCase):
 
     def test_the_convention_does_matter_for_an_invalid_first_byte(self):
         self.assertNotEqual(own_encode([0xFF], True), own_encode([0xFF], False))
+
+
+class SlicerExactTiming(unittest.TestCase):
+    """Exact-cycle golden tests for usb_ls.UsbRx (independent 33/33/34 generator, no model constants)."""
+
+    @staticmethod
+    def _run_raw(dp, dm, en=None):
+        u = U.UsbRx()
+        out = []
+        prev = dp[0]
+        for k in range(len(dp)):
+            e = True if en is None else en[k]
+            out.append(u.step(e, dp[k], prev, dm[k]))
+            prev = dp[k]
+        return u, out
+
+    @staticmethod
+    def _gen_cells(cells, lead=10, eop=50, tail=20):
+        """Independent cell-level generator: cells = [(level, width_cycles), ...], level 1=K, 0=J."""
+        dp, dm = [0] * lead, [1] * lead
+        for lv, w in cells:
+            dp += [lv] * w
+            dm += [1 - lv] * w
+        dp += [0] * eop
+        dm += [0] * eop
+        dp += [0] * tail
+        dm += [1] * tail
+        return dp, dm
+
+    def test_exact_sample_cycles_and_33_33_34_rollover(self):
+        """Exact tick cycles across free-running 33/33/34 rollovers and edge-driven idx wrap (P1-P5, P20)."""
+        # SYNC = K J K J K J K K (idx 0..2, 0..2, 0, 1); last SYNC K rolls over free-running after 33 (idx 0).
+        # Then in RUN:
+        #   bit 0: 1 (no edge, idx=1 len 33) -> rollover at 276, sample at 292
+        #   bit 1: 1 (no edge, idx=2 len 34) -> rollover at 310, sample at 326
+        #   bit 2: 0 (edge at 343, idx 0->1, len 33) -> sample at 359
+        #   bit 3: 0 (edge at 376, idx 1->2, len 34) -> sample at 392
+        #   bit 4: 1 (no edge, idx=2 len 34) -> rollover at 410, sample at 426  (idx%2 would roll at 409->425)
+        #   EOP  : SE0 at 443 -> rollover at 443, sample at 459 (tick+stop)
+        sync = [(1, 33), (0, 33), (1, 34), (0, 33), (1, 33), (0, 34), (1, 33), (1, 33)]
+        data = [(1, 33), (1, 34), (0, 33), (1, 34), (1, 33)]
+        dp, dm = self._gen_cells(sync + data, lead=10, eop=50, tail=20)
+        _, out = self._run_raw(dp, dm)
+        ticks = [(k, d, s, e) for k, (t, d, s, e) in enumerate(out) if t]
+        self.assertEqual(ticks, [
+            (292, 1, 0, 0),
+            (326, 1, 0, 0),
+            (359, 0, 0, 0),
+            (392, 0, 0, 0),
+            (426, 1, 0, 0),
+            (459, 1, 1, 0),
+        ])
+
+    def test_pre_sample_glitch_does_not_advance_cell_index(self):
+        """An edge before SAMPLE_AT (smp == False) restarts cnt without advancing idx (kills P9)."""
+        # After SYNC (idx=1 on cell 7), bit 0 (1) has idx=2 (starts 276, len 34), bit 1 (0) starts 310 (idx=0).
+        # Inject a 1-cycle glitch (two edges) at 314..315 (cnt=4,5 < 16): smp is False so idx stays 0 (len 33),
+        # cnt restarts at 315 -> bit 1 sampled at 315+16=331; bit 2 (1, no edge) rolls over at 315+33=348 -> 364.
+        # Without smp gating, the two edges advance idx 0->1->2 (len 34), shifting bit 2 sample to 365.
+        sync = [(1, 33), (0, 33), (1, 34), (0, 33), (1, 33), (0, 34), (1, 33), (1, 33)]
+        data = [(1, 34), (0, 38), (0, 33)]
+        dp, dm = self._gen_cells(sync + data, lead=10, eop=50, tail=20)
+        dp[314] = 1
+        dm[314] = 0
+        _, out = self._run_raw(dp, dm)
+        ticks = [(k, d, s) for k, (t, d, s, _e) in enumerate(out) if t]
+        self.assertEqual(ticks[:3], [(292, 1, 0), (331, 0, 0), (364, 1, 0)])
+
+    def test_lockout_quiet_boundary_263_264_265(self):
+        """LOCKOUT exits after exactly 264 quiet cycles (not 198, not 265) (kills P6, P7)."""
+        ack_cells = [(1, 33), (0, 33), (1, 34), (0, 33), (1, 33), (0, 34), (1, 33), (1, 33),
+                     (0, 33), (0, 33), (1, 34), (0, 33), (0, 33), (1, 34), (1, 33), (1, 33)]
+        for quiet, expect_decode in ((263, False), (264, True), (265, True)):
+            with self.subTest(quiet=quiet):
+                # Force SYNC failure -> LOCKOUT: rising edge at k=10, stay K for 2 cells -> fails at ncell=1,
+                # then drop to J for `quiet` cycles (first J cycle is the falling edge resetting quiet=0,
+                # followed by `quiet` quiet J cycles), then send valid ACK packet.
+                dp = [0] * 10 + [1] * 60 + [0] * (1 + quiet)
+                dm = [1] * 10 + [0] * 60 + [1] * (1 + quiet)
+                ap, am = self._gen_cells(ack_cells, lead=0, eop=50, tail=20)
+                _, out = self._run_raw(dp + ap, dm + am)
+                pkts = U.packets_from_ticks([x[0] for x in out], [x[1] for x in out],
+                                            [x[2] for x in out], [x[3] for x in out])
+                if expect_decode:
+                    self.assertEqual(pkts, [(U.bits_of([0xD2]), False)])
+                else:
+                    self.assertEqual(pkts, [])
+
+    def test_se0_during_sync_enters_lockout(self):
+        """SE0 on a SYNC cell expecting J (dp=0, dm=0) must reject SYNC (kills P11)."""
+        # Cell 1 expects J (dp=0, dm=1); drive SE0 (dp=0, dm=0) instead, followed by valid rest of SYNC + ACK.
+        cells = [(1, 33), (0, 33), (1, 34), (0, 33), (1, 33), (0, 34), (1, 33), (1, 33),
+                 (0, 33), (0, 33), (1, 34), (0, 33), (0, 33), (1, 34), (1, 33), (1, 33)]
+        dp, dm = self._gen_cells(cells, lead=10, eop=50, tail=20)
+        for k in range(10 + 33, 10 + 66):
+            dm[k] = 0                                        # SE0 during SYNC cell 1
+        u, out = self._run_raw(dp, dm)
+        pkts = U.packets_from_ticks([x[0] for x in out], [x[1] for x in out],
+                                    [x[2] for x in out], [x[3] for x in out])
+        self.assertEqual(pkts, [])
+
+    def test_falling_dp_edge_in_idle_does_not_start_sync(self):
+        """Only a rising D+ edge starts SYNC from IDLE (kills P15)."""
+        u = U.UsbRx()
+        self.assertEqual(u.step(True, 0, 1, 1), (0, 0, 0, 0))
+        self.assertEqual(u.st, "IDLE")
+
+    def test_disable_forces_idle_from_every_state(self):
+        """step(en=False) forces IDLE and zeroes outputs from SYNC, RUN, and LOCKOUT (kills P21)."""
+        # 1. SYNC -> en=False -> IDLE
+        u = U.UsbRx()
+        u.step(True, 1, 0, 0)
+        self.assertEqual(u.st, "SYNC")
+        self.assertEqual(u.step(False, 1, 1, 0), (0, 0, 0, 0))
+        self.assertEqual(u.st, "IDLE")
+        # 2. RUN -> en=False -> IDLE
+        sync = [(1, 33), (0, 33), (1, 34), (0, 33), (1, 33), (0, 34), (1, 33), (1, 33)]
+        dp, dm = self._gen_cells(sync, lead=10, eop=0, tail=0)
+        u, _ = self._run_raw(dp, dm)
+        self.assertEqual(u.st, "RUN")
+        self.assertEqual(u.step(False, 1, 1, 0), (0, 0, 0, 0))
+        self.assertEqual(u.st, "IDLE")
+        # 3. LOCKOUT -> en=False -> IDLE
+        dp_bad = [0] * 10 + [1] * 60
+        dm_bad = [1] * 10 + [0] * 60
+        u, _ = self._run_raw(dp_bad, dm_bad)
+        self.assertEqual(u.st, "LOCKOUT")
+        self.assertEqual(u.step(False, 0, 1, 1), (0, 0, 0, 0))
+        self.assertEqual(u.st, "IDLE")
 
 
 if __name__ == "__main__":

@@ -243,6 +243,19 @@ class Loopback(unittest.TestCase):
         self.check([pkt])
 
 
+    def test_invalid_first_byte_leading_ones_stuffing(self):
+        """First byte starting with 6+ ones (invalid PID 0xFF, 0x7F) must stuff after 6 ones, not 5 (kills T9)."""
+        for pkt in ([0xFF], [0x7F, 0x00]):
+            with self.subTest(pkt=pkt):
+                t, w = run_tx([pkt])
+                dp, dm = w.levels(6), w.levels(7)
+                e0 = dp.index(1)
+                ep, em = U.tx_expected(pkt)
+                self.assertEqual(dp[e0:e0 + len(ep)], ep)
+                self.assertEqual(dm[e0:e0 + len(em)], em)
+                self.assertFalse(t.illegal)
+
+
 class Sizes(unittest.TestCase):
     def test_program_fits_one_page(self):
         with open(os.path.join(EX_DIR, "usb_tx.asm")) as f:

@@ -208,5 +208,20 @@ class BadPackets(unittest.TestCase):
         check_response(self, w, ends[1][1], ACK)
 
 
+    def test_empty_packet_after_packet_gets_no_response(self):
+        """Empty packet after a good DATA0 or after a truncated DATA0 (leaving c0=0xC3 if not cleared) gets no response (kills D10)."""
+        sync_only = [1, 0, 1, 0, 1, 0, 1, 1]
+        good_d0 = self.levels_of(PKTS[0])[0]
+        trunc_d0 = list(good_d0[:8 + 8 + 3])            # full DATA0 PID (sets c0=0xC3), then partial byte 1 -> bad: -> start:
+        dp, dm = self.wave([good_d0, sync_only, trunc_d0, sync_only, good_d0])
+        t, w = run(dp, dm)
+        ends = host_packet_ends(dp, dm)
+        self.assertEqual(len(ends), 5)
+        for (_, j), exp in zip(ends, [ACK, None, None, None, ACK]):
+            check_response(self, w, j, exp)
+        self.assertEqual(len(RX.flags(t, 5)), 1)        # only trunc_d0 flagged bad
+        self.assertFalse(t.illegal)
+
+
 if __name__ == "__main__":
     unittest.main()
