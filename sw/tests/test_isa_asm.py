@@ -234,12 +234,13 @@ class ExamplesAssemble(unittest.TestCase):
                 self.assertEqual(p.words, p2.words)
 
     def test_generated_sv_package_is_current(self):
-        pkg = os.path.join(os.path.dirname(__file__), "..", "..", "rtl", "ttpe_isa_pkg.sv")
-        if os.path.exists(pkg):
-            with open(pkg) as f:
-                text = f.read()
-            self.assertEqual(text, isa.gen_sv(),
-                             "rtl/ttpe_isa_pkg.sv is stale: run  python3 sw/ttpe_isa.py --gen-sv > rtl/ttpe_isa_pkg.sv")
+        pkg = os.path.join(os.path.dirname(__file__), "..", "..", "src", "ttpe_isa_pkg.sv")
+        self.assertTrue(os.path.exists(pkg),
+                        "src/ttpe_isa_pkg.sv not found at %s" % os.path.abspath(pkg))
+        with open(pkg) as f:
+            text = f.read()
+        self.assertEqual(text, isa.gen_sv(),
+                         "src/ttpe_isa_pkg.sv is stale: run  python3 sw/ttpe_isa.py --gen-sv > src/ttpe_isa_pkg.sv")
 
 
 if __name__ == "__main__":

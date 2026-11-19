@@ -228,6 +228,10 @@ def run_suite(tmp):
 def copy_sw(tmp):
     shutil.copytree(HERE, os.path.join(tmp, "sw"),
                     ignore=shutil.ignore_patterns("__pycache__", "build", "*.pyc", "*.zip"))
+    sv_pkg = os.path.join(HERE, "..", "src", "ttpe_isa_pkg.sv")
+    if os.path.exists(sv_pkg):
+        os.makedirs(os.path.join(tmp, "src"), exist_ok=True)
+        shutil.copy2(sv_pkg, os.path.join(tmp, "src", "ttpe_isa_pkg.sv"))
 
 
 def run_one(item):
