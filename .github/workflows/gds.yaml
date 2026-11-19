@@ -40,6 +40,30 @@ jobs:
           " || true
           echo "=== 4. Final Executed Steps ==="
           ls -1d runs/wokwi/[0-9]* 2>/dev/null || true
+          echo "=== 5. Untruncated STA (WNS/TNS/Slew/Cap) ==="
+          cat runs/wokwi/*-openroad-stapostpnr/summary.rpt 2>/dev/null || true
+          python3 -c "
+          import glob, json
+          for p in ['runs/wokwi/final/metrics.json'] + sorted(glob.glob('runs/wokwi/*-openroad-stapostpnr/state_out.json')):
+              try:
+                  d = json.load(open(p))
+              except Exception:
+                  continue
+              m = d.get('metrics', d) if isinstance(d, dict) else {}
+              print('--- Metrics from:', p, '---')
+              for k in sorted(m):
+                  if any(t in k for t in ('timing__', 'max_slew', 'max_cap', 'max_fanout', 'clock__skew')):
+                      print(f'  {k}: {m[k]}')
+              break
+          " || true
+          for c in runs/wokwi/*-openroad-stapostpnr/nom_*; do
+            [ -d "$c" ] || continue
+            echo "--- Corner: $(basename "$c") ---"
+            for r in ws.max.rpt wns.max.rpt tns.max.rpt ws.min.rpt wns.min.rpt tns.min.rpt; do
+              [ -f "$c/$r" ] && printf "  %-12s " "$r" && tr '\n' ' ' < "$c/$r" && echo
+            done
+            [ -f "$c/violator_list.rpt" ] && echo "  [violator_list.rpt head -40]" && head -n 40 "$c/violator_list.rpt"
+          done || true
 
   precheck:
     needs: gds
