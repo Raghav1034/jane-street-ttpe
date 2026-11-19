@@ -1,7 +1,7 @@
 # Phase E: physical-design safety audit, risk register, protocol matrix (USB low-speed RX)
 
 Author's note on evidence: "RTL sim" below means Icarus + cocotb results **reported by the maintainer** (not re-run in this review; local `test/results_core_pdk.xml` dated 2026-10-23): 107 cocotb tests
-(18 `TARGET=mem` + 8 `TARGET=usb` + 65 `TARGET=core` [62 scenarios + 3 harness tests] + 16 `TARGET=top`; usb+core+top = 89; + 138 Python = 245 total;
+(18 `TARGET=mem` + 8 `TARGET=usb` + 65 `TARGET=core` [62 scenarios + 3 harness tests] + 16 `TARGET=top`; usb+core+top = 89; + 148 Python = 255 total;
 independent count of registered tests matches 107). Update after the physical flow: GitHub Actions on `dev/protocol-continuation` (commit `ba2e07b`, 6x4 tile), as reported by the project author (raw CI log not verified in this review): `gds` (LibreLane 3.1.0.dev3, ihp-sg13cmos5l), `precheck` (DRC/LVS/antenna/manifest), `gl_test` (functional `-DFUNCTIONAL` gate-level run of all 16 `test_ttpe_top` tests on the post-P&R netlist, not SDF-timed, including `t_usb_rx_e2e`, `t_usb_mode_register`, `t_usb_disabled_passthrough`) and `viewer` all passed; 8x4 re-hardening is pending. The
 author of this file saw the CI summary and log excerpts, not the raw logs; numbers (area, WNS/TNS, congestion) are still to
 be compared with baseline `d8bffd4`. Nothing else in this file is a synthesis, STA, layout or silicon result.
@@ -150,7 +150,7 @@ Files changed or added (22 in the commit; the list below predates the commit and
 ?? docs/PHASE_E_REPORT.md   (this file)
 ```
 
-State: RTL integrated and simulated by the maintainer (not re-run in this review; local `test/results_core_pdk.xml` dated 2026-10-23): 107/107 cocotb (mem 18, usb 8, core 65 [62 scenarios + 3 harness tests, incl. 5 `usb_dev_*`], top 16; usb+core+top = 89); Python suite 138/138 (245 total); firmware/model mutation harness `sw/mutants_fw.py` (76/93 killed, 17 survived); GDS, precheck, functional `gl_test` (`-DFUNCTIONAL`) and viewer CI
+State: RTL integrated and simulated by the maintainer (not re-run in this review; local `test/results_core_pdk.xml` dated 2026-10-23): 107/107 cocotb (mem 18, usb 8, core 65 [62 scenarios + 3 harness tests, incl. 5 `usb_dev_*`], top 16; usb+core+top = 89); Python suite 148/148 (`python -I -m unittest discover -s sw/tests -f`; 255 total with cocotb); firmware/model mutation harness `sw/mutants_fw.py` (92 killed + 1 argued equivalent [`I14`] of 93); GDS, precheck, functional `gl_test` (`-DFUNCTIONAL`) and viewer CI
 jobs reported passing at 6x4 on `dev/protocol-continuation` (`ba2e07b`, raw CI log not verified in this review; 8x4 re-hardening pending); ISA v0.2 unchanged; with
 `MODE.usb_en = 0` the design is the previous design plus 30 idle flops. Open: baseline comparison of the physical results and the Max Slew/Cap warnings (1.7), real-trace
 replay, host drain budget, electrical interface.

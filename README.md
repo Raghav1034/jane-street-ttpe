@@ -308,7 +308,7 @@ Level 3| Core Lockstep Co-Sim (65: 62 scenarios + 3 harness)       |
        +-----------------------------------------------------------+
 Level 2| SRAM Controller & Memory Tests (test_ttpe_mem.py, 18)     |
        +-----------------------------------------------------------+
-Level 1| Instruction Set Simulator & Unit Tests (138 tests)        |
+Level 1| Instruction Set Simulator & Unit Tests (148 tests)        |
        +-----------------------------------------------------------+
 ```
 
@@ -316,13 +316,13 @@ Level 1| Instruction Set Simulator & Unit Tests (138 tests)        |
 
 1. **Software Reference Model (`sw/ttpe_iss.py`):**
    - Pure Python cycle-exact instruction set simulator.
-   - 138 unit tests in `sw/tests/` (including the USB model, USB TX loopback, I2C repeated START and the host driver) verifying opcode behavior, register transfers, timing deltas, and edge-detect timing.
+   - 148 unit tests in `sw/tests/` (`python -I -m unittest discover -s sw/tests -f`, including the USB model exact-timing tests, USB TX loopback, I2C repeated START and the host driver) verifying opcode behavior, register transfers, timing deltas, and edge-detect timing.
 2. **SRAM Subsystem Verification (`test/test_ttpe_mem.py`):**
    - 18 cocotb testcases validating memory arbitration, host read/write latency, pipeline hold, flush, and wrap.
 3. **Core Lockstep Co-Simulation (`test/test_ttpe_core.py`):**
    - 65/65 cocotb tests (62 scenarios + 3 harness tests: 16 directed + 17 protocol examples + 14 USB including 5 `usb_dev_*` autonomous ACK/NAK + 3 USB transmit + 12 fuzz), reported passing by the maintainer (`make -C test TARGET=core`, local `test/results_core_pdk.xml` dated 2026-10-23, not re-run in this review).
    - Compares the SystemVerilog RTL cycle-by-cycle against `ttpe_iss.py` in lockstep.
-   - Earlier pre-USB mutation check (28 mutants against a Python transcription, not committed in this repo); firmware/model mutation harness `sw/mutants_fw.py` (76/93 killed, 17 survived) is included in the repo.
+   - Earlier pre-USB mutation check (28 mutants against a Python transcription, not committed in this repo); firmware/model mutation harness `sw/mutants_fw.py` (`python -I sw/mutants_fw.py`: 92 killed + 1 argued equivalent [`I14`] of 93) is included in the repo.
 4. **Chip Top Pin Verification (`test/test_ttpe_top.py`):**
    - 16 comprehensive end-to-end tests (including USB MODE register, USB receive and disabled-passthrough) driving the design strictly through its top-level pins (`ui_in`, `uo_out`, `uio`).
    - Verifies SPI slave framing, register read/write, memory loading, FIFO streaming, and protocol execution.
@@ -331,7 +331,7 @@ Level 1| Instruction Set Simulator & Unit Tests (138 tests)        |
    - CI on `dev/protocol-continuation` (`ba2e07b`, 6×4 tile): `gds`, `precheck`, `gl_test` (16/16, incl. USB) and `viewer` reported passing by the maintainer (raw CI log not verified in this review); 8×4 re-hardening is pending.
 6. **Low-speed USB receiver (`test/test_ttpe_usb.py`):**
    - 8 cocotb tests compare `ttpe_usb_rx` against the Python model `sw/usb_ls.py` on every clock (rate error, jitter, D-/D+ skew, bit stuffing, errors, enable/reset, ~82k-cycle fuzz). Run: `make -C test TARGET=usb`.
-   - Maintainer-reported RTL baseline (not re-run in this review): 8 (`usb`) + 65 (`core`: 62 scenarios + 3 harness tests) + 16 (`top`) = 89 tests (+ 18 `mem` = 107 cocotb tests; + 138 Python unit tests = 245 total).
+   - Maintainer-reported RTL baseline (not re-run in this review): 8 (`usb`) + 65 (`core`: 62 scenarios + 3 harness tests) + 16 (`top`) = 89 tests (+ 18 `mem` = 107 cocotb tests; + 148 Python unit tests = 255 total).
 
 ### Cocotb 2.1 & Gate-Level Netlist CI Fix
 During CI runs with `cocotb >= 2.1.0`, passing test runs generate XML attributes formatted as:
@@ -439,7 +439,7 @@ jane-street-ttpe/
 │   └── ttpe_sram_ctrl.sv   # Deterministic 3-stage SRAM memory arbiter
 ├── sw/
 │   ├── examples/           # Assembly programs: uart_tx, uart_rx, spi_master, i2c_master, usb_rx, usb_tx, usb_device_ack
-│   ├── tests/              # 138 Python ISA, ISS, USB, I2C and host-driver unit tests
+│   ├── tests/              # 148 Python ISA, ISS, USB, I2C and host-driver unit tests
 │   ├── ttpe_asm.py         # Complete macro assembler
 │   ├── ttpe_isa.py         # Canonical source of truth for instruction encodings
 │   ├── ttpe_iss.py         # Cycle-exact Instruction Set Simulator (ISS)
@@ -597,11 +597,11 @@ During the USB phase, the AI environment did not have access to an HDL simulator
 **Method.**
 1. *Model first.* `ttpe_isa.py` / `ttpe_iss.py` define a cycle-exact golden model (`commit = accept + 1 + delta`, 3-cycle branch penalty, 2-flop input synchroniser). Protocol programs are written and timing-checked on the model before any RTL depends on them.
 2. *Lockstep RTL co-simulation.* The Execution Unit RTL is compared with the model every cycle in cocotb (`make -C test TARGET=core`: 65 tests = 62 scenarios + 3 harness tests, including directed ISA, FIFO and host-interface cases, protocol examples, USB receive/transmit/autonomous ACK, I2C repeated START and random fuzz). Chip-pin tests (`TARGET=top`, 16) drive only `ui_in`/`uio` and check `uo_out`/`uio`.
-3. *Fault injection.* An earlier pre-USB mutation check (28 mutants in a Python transcription, not committed in this repo) predates the USB block; the firmware/model mutation harness `sw/mutants_fw.py` (76/93 killed, 17 survived) is included in the repository.
+3. *Fault injection.* An earlier pre-USB mutation check (28 mutants in a Python transcription, not committed in this repo) predates the USB block; the firmware/model mutation harness `sw/mutants_fw.py` (`python -I sw/mutants_fw.py`: 92 killed + 1 argued equivalent [`I14`] of 93) is included in the repository.
 4. *Primitive against its specification.* The USB bit slicer `ttpe_usb_rx` is compared per cycle with its Python model (`TARGET=usb`, about 82k fuzz cycles), plus an independent decode of its outputs back to packet bits; the transmit program is checked cycle for cycle against `usb_ls.tx_expected` and looped back through the receive model and `usb_rx.asm`.
 5. *Gate level and physical.* The same top-level tests run as a **functional** (`-DGL_TEST -DFUNCTIONAL`, zero-delay / not SDF-timed) gate-level simulation on the post-P&R netlist in CI (`gl_test`), with the LibreLane flow, DRC, LVS and the Tiny Tapeout precheck (hardened at 6×4, author-reported, raw CI log not verified in this review; 8×4 re-hardening pending). Power-grid alignment of the IHP SRAM macro is described in section 8.
 
-**Evidence and its limits.** Python suite: 138/138 tests (`python -I -m unittest discover -s sw/tests -v`), including independent USB vectors (SETUP, DATA0, ACK as literal line levels) and the closed-loop USB handshake tests; mutation harness `sw/mutants_fw.py` (76/93 killed, 17 survived). RTL (maintainer-reported baseline, not re-run in this review; local `test/results_core_pdk.xml` dated 2026-10-23): 107/107 cocotb tests (18 `mem` + 8 `usb` + 65 `core` [62 scenarios + 3 harness tests, including 5 `usb_dev_*`] + 16 `top`; 89 for `usb+core+top`, 245 combined with Python). GDS, precheck, `gl_test` and viewer jobs reported green in CI at 6×4 on `dev/protocol-continuation` (`ba2e07b`, raw CI log not verified in this review; 8×4 re-hardening pending). Not covered, and listed with severity in `docs/PHASE_E_REPORT.md`: models, RTL and tests share one author, so a shared misreading would pass every test; the USB conventions were cross-checked in part against public sources (J/K polarity, six-ones stuffing, +-1.5% rate, 1.25-1.50 us EOP, D- pull-up; table in `docs/USB_LS_RX.md` section 7) but the turnaround window and receiver acceptance widths were not, and nothing was checked against a real host or captured trace; pad electricals, pull-ups and USB thresholds are unverified; nothing has run on silicon. The CI log shows Max Slew / Max Cap warnings and 874 hold buffers that have not been compared with an earlier run.
+**Evidence and its limits.** Python suite: 148/148 tests (`python -I -m unittest discover -s sw/tests -f`), including independent USB vectors (SETUP, DATA0, ACK as literal line levels), exact-timing slicer golden tests, and closed-loop USB handshake tests; mutation harness `sw/mutants_fw.py` (`python -I sw/mutants_fw.py`: 92 killed + 1 argued equivalent [`I14`] of 93, 0 STALE, 0 INVALID). RTL (maintainer-reported baseline, not re-run in this review; local `test/results_core_pdk.xml` dated 2026-10-23): 107/107 cocotb tests (18 `mem` + 8 `usb` + 65 `core` [62 scenarios + 3 harness tests, including 5 `usb_dev_*`] + 16 `top`; 89 for `usb+core+top`, 255 combined with Python). GDS, precheck, `gl_test` and viewer jobs reported green in CI at 6×4 on `dev/protocol-continuation` (`ba2e07b`, raw CI log not verified in this review; 8×4 re-hardening pending). Not covered, and listed with severity in `docs/PHASE_E_REPORT.md`: models, RTL and tests share one author, so a shared misreading would pass every test; the USB conventions were cross-checked in part against public sources (J/K polarity, six-ones stuffing, +-1.5% rate, 1.25-1.50 us EOP, D- pull-up; table in `docs/USB_LS_RX.md` section 7) but the turnaround window and receiver acceptance widths were not, and nothing was checked against a real host or captured trace; pad electricals, pull-ups and USB thresholds are unverified; nothing has run on silicon. The CI log shows Max Slew / Max Cap warnings and 874 hold buffers that have not been compared with an earlier run.
 
 Reproduce: `python3 -I -m unittest discover -s sw/tests -v`, `make -C test regress` (needs Icarus Verilog and cocotb), `make -C sw images`.
 

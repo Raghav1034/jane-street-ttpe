@@ -47,7 +47,7 @@ All inputs are sampled at the edge that ends the cycle in which they are applied
 | What | Status |
 |---|---|
 | `test/test_ttpe_core.py` on the real RTL under Icarus + cocotb | 65/65 tests (62 scenarios + 3 harness tests) reported passing by the maintainer (local `test/results_core_pdk.xml` dated 2026-10-23, not re-run in this review). |
-| `sw/tests` | 138/138 tests pass (`python -I -m unittest discover -s sw/tests`); mutation harness `sw/mutants_fw.py`: 76/93 killed, 17 survived. |
+| `sw/tests` | 148/148 tests pass (`python -I -m unittest discover -s sw/tests -f`); mutation harness `sw/mutants_fw.py`: 92 killed + 1 argued equivalent (`I14`) of 93. |
 | Synthesis, area, timing | Hardened at 6x4 in CI (author-reported `gds`, `precheck`, functional `gl_test` 16/16 on `dev/protocol-continuation`, not verified in this review); 8x4 re-hardening and baseline comparison pending (see `docs/PHASE_E_REPORT.md` 1.7). |
 
 `ttpe_exec.sv` no longer uses constant bit-selects inside `always_comb` (named wires instead), which
