@@ -914,10 +914,11 @@ def usb_device_ack():
     lv, st = usb_dev_levels(U.data_packet("DATA0", [0xFC, 0x01]))
     lv[st[0]] = lv[st[0] - 1]                         # stuff violation exactly at a byte boundary
     part = usb_dev_levels(pk[0])[0][:-3]              # last byte cut after 5 bits
-    dp, dm = usb_dev_wave([lv, good, part, good])
+    empty = usb_dev_levels([])[0]                     # SYNC + EOP only (0 bytes, after partial packet with c0=0xC3)
+    dp, dm = usb_dev_wave([lv, good, part, empty, good])
     # the bad packets push the bytes that completed before the error: C3 FC, and all but the last byte of DATA0
     out.append(scn_usb_device_ack("bad_then_good", dp, dm, [0xC3, 0xFC] + pk[0] + pk[0][:-1] + pk[0],
-                                  [None, ack, None, ack], bad=2))
+                                  [None, ack, None, None, ack], bad=2))
     resp_len = len(U.tx_expected(ack)[0])
     dp, dm = U.waveform([pk[0], pk[3], pk[0]], gap_cycles=140 + resp_len + 20)
     out.append(scn_usb_device_ack("back_to_back", dp, dm, [b for q in (pk[0], pk[3], pk[0]) for b in q], [ack, ack, ack]))
