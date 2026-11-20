@@ -7,7 +7,7 @@ not the raw logs; the cell count, area, WNS/TNS and congestion numbers have not 
 `d8bffd4` yet (see `PHASE_E_REPORT.md` 1.5). `gl_test` runs only the top-level tests, on one set of vectors: it is
 evidence that synthesis kept the tested behaviour, not a formal equivalence proof.
 Everything called "measured" below was produced by the Python reference model (`sw/usb_ls.py`) running against the
-cycle-accurate ISS (`sw/ttpe_iss.py`): `python3 -I -m unittest discover -s sw/tests -f` (148/148 tests). The USB signalling
+cycle-accurate ISS (`sw/ttpe_iss.py`): `python3 -I -m unittest discover -s sw/tests -f` (152/152 tests, CI run `44706700512`). The USB signalling
 conventions come from the author's memory of the specification and no real USB capture has been replayed.
 ISA v0.2 is unchanged; with MODE.usb_en = 0 (reset value) the design behaves as before.
 

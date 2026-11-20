@@ -5,7 +5,7 @@ reference model (`sw/ttpe_iss.py`). Source of truth for all encodings: `sw/ttpe_
 The SystemVerilog package `src/ttpe_isa_pkg.sv` is generated from it
 (`python3 sw/ttpe_isa.py --gen-sv > src/ttpe_isa_pkg.sv`); `sw/tests/test_isa_asm.py` checks it.
 
-Every timing statement below is checked cycle-exactly by `sw/tests` (148 tests, `python -I -m unittest discover -s sw/tests -f`). Cycle numbers are
+Every timing statement below is checked cycle-exactly by `sw/tests` (152 tests, `python -I -m unittest discover -s sw/tests -f`). Cycle numbers are
 integers; one cycle is 20 ns at 50 MHz.
 
 ## 1. Architectural state
@@ -141,10 +141,10 @@ bytes in the host TX FIFO until the host pulses `CTRL.tx_flush` (register `0x02`
 
 ## 7. Verification status
 
-* 148 unit and protocol tests (including USB receive/transmit, exact slicer timing, autonomous ACK and I2C repeated START), standard library only: `python3 -I -m unittest discover -s sw/tests -f`.
-* Fault injection: firmware/model mutation harness `sw/mutants_fw.py` (`python -I sw/mutants_fw.py`: 92 killed + 1 argued equivalent [`I14`] of 93 on the 148-test suite).
+* 152 unit and protocol tests (including USB receive/transmit, exact slicer timing, autonomous ACK, I2C repeated START, and WP2(b) post-reset X/Z strictness), standard library only: `python3 -I -m unittest discover -s sw/tests -f`.
+* Fault injection: firmware/model mutation harness `sw/mutants_fw.py` (`python -I sw/mutants_fw.py`: 92 killed + 1 argued equivalent [`I14`] of 93).
 * The Execution Unit RTL is compared cycle by cycle with this model in cocotb lockstep (`make -C test TARGET=core`:
-  65/65 tests = 62 scenarios + 3 harness tests, including the 5 `usb_dev_*` scenarios), plus memory (`TARGET=mem`, 18), USB slicer (`TARGET=usb`, 8), chip-pin (`TARGET=top`, 16) — 107 cocotb tests total (255 with Python) as reported by the maintainer (local `test/results_core_pdk.xml` dated 2026-10-23, not re-run in this review) — and functional gate-level simulation (`gl_test`, `-DGL_TEST -DFUNCTIONAL`, not SDF-timed) in CI at 6x4 (author-reported on `dev/protocol-continuation`, not verified in this review; 8x4 pending).
+  65/65 tests = 62 scenarios + 3 harness tests, including the 5 `usb_dev_*` scenarios), plus memory (`TARGET=mem`, 18), USB slicer (`TARGET=usb`, 8), chip-pin (`TARGET=top`, 16 with WP2(b) strict post-reset X/Z checking on all 24 output pins and explicit SRAM test initialization, no masking) — 107 PDK-SRAM cocotb tests total (259 primary tests with Python, plus 99 stub-SRAM cocotb tests), CI-verified on run `44706700512` (`df0cdcc`), and functional gate-level simulation (`gl_test`, `-DGL_TEST -DFUNCTIONAL`, zero-delay / not SDF-timed, 16/16) in CI at 8x4 (run `44706700541`, `df0cdcc`).
   Nothing has run on silicon.
 
 ## 8. Open items
