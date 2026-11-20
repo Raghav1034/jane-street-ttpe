@@ -232,6 +232,10 @@ def copy_sw(tmp):
     if os.path.exists(sv_pkg):
         os.makedirs(os.path.join(tmp, "src"), exist_ok=True)
         shutil.copy2(sv_pkg, os.path.join(tmp, "src", "ttpe_isa_pkg.sv"))
+    top_py = os.path.join(HERE, "..", "test", "test_ttpe_top.py")
+    if os.path.exists(top_py):
+        os.makedirs(os.path.join(tmp, "test"), exist_ok=True)
+        shutil.copy2(top_py, os.path.join(tmp, "test", "test_ttpe_top.py"))
 
 
 def run_one(item):

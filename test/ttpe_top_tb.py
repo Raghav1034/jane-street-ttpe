@@ -324,7 +324,7 @@ async def t_spi_timing(h):
     await h.reset()
     rng = random.Random(5)
     words = [rng.randrange(1 << 32) for _ in range(12)]
-    await h.load_words(words)
+    await h.load_words(words + [0])              # guard word at len(words) for trailing SPI prefetch
     for half, extra, setup, hold, gap in ((8, 0, 8, 8, 8), (8, 3, 8, 8, 8), (9, 1, 4, 8, 4),
                                           (16, 0, 8, 8, 8), (8, 0, 4, 8, 4), (11, 5, 6, 3, 5)):
         v = rng.randrange(256)
@@ -353,6 +353,7 @@ async def t_sram_window(h):
     img = [rng.randrange(1 << 32) for _ in range(40)]
     await h.load_words(img)
     assert await h.rd1(R_SA_LO) == 40 and await h.rd1(R_SA_HI) == 0      # auto increment
+    await h.load_words([0], base=40)             # guard word for trailing prefetch after word 39
     assert await h.read_words(40) == img
     assert await h.rd1(R_SA_LO) == 40
     for a in (0, 7, 39):
@@ -384,10 +385,11 @@ async def t_sram_window(h):
     assert await h.rd1(R_SA_LO) == 1 and await h.rd1(R_SA_HI) == 0
     assert await h.read_words(1, base=511) == [edge[0]]
     assert await h.read_words(1, base=0) == [edge[1]]
+    await h.load_words([edge[2]], base=510)      # initialise word 510 before reading 510..511..0
     await h.set_saddr(510)
     b = await h.rd(R_SRAM, 12)
     w = [b[4 * i] | (b[4 * i + 1] << 8) | (b[4 * i + 2] << 16) | (b[4 * i + 3] << 24) for i in range(3)]
-    assert w[1] == edge[0] and w[2] == edge[1], w
+    assert w == [edge[2], edge[0], edge[1]], w
     assert await h.rd1(R_ERR) == 0
 
 
@@ -574,7 +576,7 @@ async def t_async_reset(h):
     await h.reset()
     src = "PINS high uio2 @2\nPINS high uo6 @2\nWAIT low uio7 @2\nHALT"
     words = trim(scn.asm_text(src))
-    await h.load_words(words)
+    await h.load_words(words + [0])              # guard word at len(words) for trailing SPI prefetch
     await h.push_tx([1, 2, 3])
     await h.start(0)
     await h.idle(60)
@@ -597,7 +599,7 @@ async def t_async_reset(h):
 async def _example_run(h, name, words, world, tx, window, post, rx_drain=False, verify=False,
                        usb=False):
     await h.reset()
-    await h.load_words(trim(words))
+    await h.load_words(trim(words) + [HALT_WORD])  # guard word for trailing SPI prefetch on verify readback
     if usb:
         await h.wr(R_MODE, 1)               # connect the USB bit slicer (docs/USB_LS_RX.md)
     if verify:

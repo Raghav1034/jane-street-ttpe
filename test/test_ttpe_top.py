@@ -35,7 +35,7 @@ def val(sig, strict=True):
         return int(sig.value)
     except ValueError:
         if strict:
-            name = getattr(sig, "_name", str(sig))
+            name = getattr(sig, "_name", "<sig>")
             raise ValueError(f"{name} contains X/Z after reset: {sig.value}") from None
         return int(str(sig.value).translate(str.maketrans("xXzZ", "0000")), 2)
 
