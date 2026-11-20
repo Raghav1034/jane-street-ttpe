@@ -29,11 +29,14 @@ import ttpe_top_tb as T                          # noqa: E402
 CLK_NS = 20
 
 
-def val(sig):
-    """Integer value of a signal; raises on X/Z so an unknown never passes silently."""
+def val(sig, strict=True):
+    """Integer value of a signal; raises on X/Z when strict=True (post-reset)."""
     try:
         return int(sig.value)
     except ValueError:
+        if strict:
+            name = getattr(sig, "_name", str(sig))
+            raise ValueError(f"{name} contains X/Z after reset: {sig.value}") from None
         return int(str(sig.value).translate(str.maketrans("xXzZ", "0000")), 2)
 
 
@@ -42,9 +45,11 @@ class CocoTop:
 
     def __init__(self, dut):
         self.dut = dut
+        self._strict = False
 
     async def start(self):
         d = self.dut
+        self._strict = False
         d.ena.value = 1
         d.ui_in.value = 0x04              # CS_N high, SCK and MOSI low
         d.uio_in.value = 0xFF
@@ -56,10 +61,12 @@ class CocoTop:
         await Timer(1, "ns")
 
     def assert_reset(self):
+        self._strict = False
         self.dut.rst_n.value = 0
 
     def release_reset(self):
         self.dut.rst_n.value = 1
+        self._strict = True
 
     async def settle(self):
         await Timer(1, "ns")
@@ -70,7 +77,8 @@ class CocoTop:
 
     def outs(self):
         d = self.dut
-        return dict(uo_out=val(d.uo_out), uio_out=val(d.uio_out), uio_oe=val(d.uio_oe))
+        s = self._strict
+        return dict(uo_out=val(d.uo_out, s), uio_out=val(d.uio_out, s), uio_oe=val(d.uio_oe, s))
 
     def drive(self, ui_in, uio_in):
         self.dut.ui_in.value = ui_in
