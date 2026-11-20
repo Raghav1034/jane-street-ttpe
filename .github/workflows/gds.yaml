@@ -62,7 +62,7 @@ jobs:
             for r in ws.max.rpt wns.max.rpt tns.max.rpt ws.min.rpt wns.min.rpt tns.min.rpt; do
               [ -f "$c/$r" ] && printf "  %-12s " "$r" && tr '\n' ' ' < "$c/$r" && echo
             done
-            [ -f "$c/checks.rpt" ] && echo "  [checks.rpt head -60]" && head -n 60 "$c/checks.rpt"
+            [ -f "$c/checks.rpt" ] && echo "  [checks.rpt report_check_types head -120]" && (sed -n '/report_check_types/,$p' "$c/checks.rpt" | head -n 120 || true)
           done || true
 
   precheck:
