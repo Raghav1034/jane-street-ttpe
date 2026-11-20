@@ -12,7 +12,7 @@ TI PRU. A program of up to 512 32-bit instructions lives in an on-chip 512x32 SR
 it takes effect exactly `delta + 1` cycles after the previous one (minimum delta 2 for back-to-back execution),
 so pin changes land on exact clock cycles. New protocols are firmware, not new silicon.
 
-* **Clock & tile:** 50 MHz default (20 ns cycle; timing constants of the examples assume 50 MHz). Hardened and CI-verified at Tiny Tapeout 8x4 (`1724.16 x 710.64 um`, DEF `tt_block_8x4_pgvdd.def`) on `@ihp-cmos5l` (`06f8069`, run `44489932940`) and `@ttihp27a` (`c261c89`, run `44503186943`).
+* **Clock & tile:** 50 MHz board clock and functional verification (20 ns cycle; `info.yaml`, RTL, and example timing constants remain at 50 MHz). Hardened and CI-verified at Tiny Tapeout 8x4 (`1724.16 x 710.64 um`, DEF `tt_block_8x4_pgvdd.def`) on `@ihp-cmos5l` (`06f8069`, run `44489932940`) and `@ttihp27a` (`c261c89`, run `44503186943`). STA closes at 60 MHz (`CLOCK_PERIOD = 16.667 ns`, one sample each; run `44572301237`, `49404b4`), functional verification at 50 MHz.
 * **ISA v0.2:** 4-bit opcode, 14 defined (`NOP PINS WAIT JMP JHI JLO SHOUT SAMPLE REG DJNZ HPUSH HPULL HALT JSB`), 2 reserved (trapped as illegal).
   Registers: 8-bit `SR`, two 8-bit counters `C0`, `C1`. 16 inputs through a 2-flop synchroniser, 16 outputs.
   A taken branch costs 3 extra cycles. Full reference: `docs/ISA.md`.
@@ -89,10 +89,12 @@ and the program idles D+ low / D- high only while it drives them. The TX FIFO mu
 
 Simulation only; nothing was measured on silicon.
 
-* Python model (ISS) with 148/148 unit and protocol tests (`python3 -I -m unittest discover -s sw/tests -f`) and mutation harness `sw/mutants_fw.py` (92 killed + 1 argued equivalent [`I14`] of 93); cocotb RTL suite CI-verified on run `44503187206` (`c261c89`): 107/107 PDK-SRAM tests (`TARGET=mem` 18, `TARGET=core` 65 = 62 scenarios + 3 harness tests, `TARGET=top` 16, `TARGET=usb` 8; 255 primary tests with Python, plus 99/99 stub-SRAM cocotb tests); functional gate-level simulation (`gl_test`, `-DGL_TEST -DFUNCTIONAL`, not SDF-timed, 16/16) and physical flow (KLayout DRC, LVS, precheck) CI-verified at 8x4 on `@ihp-cmos5l` (`06f8069`, run `44489932940`) and `@ttihp27a` (`c261c89`, run `44503186943`).
+* Python model (ISS) with 148/148 unit and protocol tests (`python3 -I -m unittest discover -s sw/tests -f`) and mutation harness `sw/mutants_fw.py` (92 killed + 1 argued equivalent [`I14`] of 93); cocotb RTL suite CI-verified on run `44503187206` (`c261c89`): 107/107 PDK-SRAM tests (`TARGET=mem` 18, `TARGET=core` 65 = 62 scenarios + 3 harness tests, `TARGET=top` 16, `TARGET=usb` 8; 255 primary tests with Python, plus 99/99 stub-SRAM cocotb tests); functional gate-level simulation (`gl_test`, `-DGL_TEST -DFUNCTIONAL`, zero-delay / not SDF-timed — no timing evidence, 16/16) and physical flow (KLayout DRC, LVS, precheck) CI-verified at 8x4 on `@ihp-cmos5l` (`06f8069`, run `44489932940`, 50 MHz), `@ttihp27a` (`c261c89`, run `44503186943`, 50 MHz), and `@ttihp27a` STA at 60 MHz (`49404b4`, run `44572301237`).
 * The USB signalling conventions (SYNC, NRZI, stuffing, EOP, tolerances) come from the author's memory of the
   specification and were checked only against the author's own model, never against a real host or a captured trace.
-* Known open items: setup and hold checkers are clear, but exact per-corner WNS/TNS values were truncated in the
-  80-column stdout table; Max Slew / Max Cap warnings appear in all three corners (`nom_fast_1p32V_m40C`,
-  `nom_slow_1p08V_125C`, `nom_typ_1p20V_25C`) with 869 (`@ihp-cmos5l`) / 714 (`@ttihp27a`) inserted hold buffers; see
-  `docs/PHASE_E_REPORT.md` §1.8.
+* Known open items: STA closes at 60 MHz (one sample each; slow-corner setup WS `+8.6630 ns` [implied `8.004 ns`
+  critical path by inference from `16.667 - 8.663`], fast-corner hold WS `+0.0898 ns`, 0 setup/hold violations; Tiny
+  Tapeout pad round trip ~10 ns, unmeasured per FAQ, is not modeled by `base.sdc`), while functional verification
+  remains at 50 MHz. Open warnings: Max Cap `30` (all corners), Max Slew `9`/`10`/`18` (`fast`/`typ`/`slow`), Max
+  Fanout `44` (all corners) at 60 MHz (50 MHz stdout showed `30` cap and `9` fast slew; other slew/fanout counts
+  truncated), with 869 (`@ihp-cmos5l`) / 714 (`@ttihp27a`) inserted hold buffers; see `docs/PHASE_E_REPORT.md` §1.8.
