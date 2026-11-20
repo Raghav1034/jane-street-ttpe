@@ -1,7 +1,8 @@
 {
   "//1": "Baseline = TinyTapeout/ttihp-verilog-template branch cmos5l. Additions: MACROS, PDN alignment, DRC/overlap settings from the Pettit SRAM walkthrough.",
   "PL_TARGET_DENSITY_PCT": 60,
-  "CLOCK_PERIOD": 20,
+  "//1a": "CLOCK_PERIOD 16.667 ns (60 MHz) is an STA constraint only; board clock (info.yaml), RTL, and firmware remain at 50 MHz.",
+  "CLOCK_PERIOD": 16.667,
   "PL_RESIZER_HOLD_SLACK_MARGIN": 0.1,
   "GRT_RESIZER_HOLD_SLACK_MARGIN": 0.05,
   "RUN_LINTER": 1,
