@@ -103,12 +103,15 @@ class IndependentI2CMaster:
         self.max_stretch_cycles = 0
         self._cur_stretch = 0
         self._scl_fall_cyc = None
+        self._scl_rise_cyc = None
+        self._last_bus_end_cyc = None   # last STOP (SDA 0->1 while SCL=1) or Sr (SDA 1->0 while SCL=1)
         self._target_sda_change_cyc = None
         self._target_prev_drive_low = False
         self._target_owns_sda = False
         self._check_vd_kind = None  # "ACK" or "DAT"
         self._was_stretched = False
         self._vd_checked = False
+        self.other_target_addrs = set()
 
         # Transaction generator coroutine
         self._gen = self._run_all(idle_lead)
@@ -169,13 +172,13 @@ class IndependentI2CMaster:
         yield from self._hold_cycles(self._jit(s["t_low"]))
         yield from self._release_scl_and_wait()
         sampled = self.bus_sda
-        # Check t_SU;DAT against last target SDA transition (if target drove/changed SDA)
-        if self._target_sda_change_cyc is not None and self._scl_fall_cyc is not None:
+        # Check t_SU;DAT on exact physical wire SCL rise cycle minus target SDA change cycle
+        if self._target_sda_change_cyc is not None and self._scl_fall_cyc is not None and self._scl_rise_cyc is not None:
             if self._target_sda_change_cyc >= self._scl_fall_cyc:
-                su = self._cycle - self._target_sda_change_cyc
+                su = self._scl_rise_cyc - self._target_sda_change_cyc
                 if su < s["t_su_dat_min"]:
                     self.violations.append(
-                        f"cyc {self._cycle}: {kind} t_SU;DAT={su} cyc < {s['t_su_dat_min']}"
+                        f"cyc {self._scl_rise_cyc}: {kind} t_SU;DAT={su} cyc < {s['t_su_dat_min']}"
                     )
         yield from self._hold_cycles(self._jit(s["t_high"]) - 1)
         self._target_owns_sda = False
@@ -217,7 +220,19 @@ class IndependentI2CMaster:
             ack_bit = yield from self._clock_read_bit(kind="ACK")
             addr_acked = (ack_bit == 0)
 
-            if not addr_acked:
+            if not addr_acked and addr7 in self.other_target_addrs and op == "W":
+                # Simulate another target on the same I2C bus ACKing and receiving payload bytes
+                for b in arg:
+                    for i in range(8):
+                        yield from self._clock_write_bit((b >> (7 - i)) & 1)
+                    # Other target ACKs; check our target does NOT collide or assert ACK
+                    ab = yield from self._clock_read_bit(kind="OTHER_ACK")
+                    if ab == 0:
+                        self.violations.append(
+                            f"cyc {self._cycle}: target spuriously ACKed data byte of other device 0x{addr7:02X}"
+                        )
+                self.results.append(("W", addr7, False, []))
+            elif not addr_acked:
                 self.results.append((op, addr7, False, []))
             elif op == "W":
                 acks = []
@@ -308,6 +323,10 @@ class IndependentI2CMaster:
         if self.prev_bus_scl == 1 and self.bus_scl == 0:
             self._scl_fall_cyc = cycle
             self._was_stretched = False
+        if self.prev_bus_scl == 0 and self.bus_scl == 1:
+            self._scl_rise_cyc = cycle
+        if self.bus_scl == 1 and self.prev_bus_scl == 1 and self.bus_sda != self.prev_bus_sda:
+            self._last_bus_end_cyc = cycle
 
         if t_scl_low and self.m_scl:
             self._was_stretched = True
@@ -349,13 +368,14 @@ class IndependentI2CMaster:
 
 def run_i2c_target(txns, spec=SPEC_100K, host_tx=(), defs=None,
                    t_r=0, jitter=0, seed=1, allow_stretch=True,
-                   master_hd_dat=0, max_cycles=250000):
+                   master_hd_dat=0, other_target_addrs=(), max_cycles=250000):
     words = assemble_target(**(defs or {}))
     cpu = iss.Ttpe(words, host_tx=list(host_tx))
     master = IndependentI2CMaster(
         txns, spec=spec, t_r=t_r, jitter=jitter, seed=seed,
         allow_stretch=allow_stretch, master_hd_dat=master_hd_dat,
     )
+    master.other_target_addrs = set(other_target_addrs)
     addr_toggles = 0
     end_toggles = 0
     prev_uo = 0
@@ -365,6 +385,10 @@ def run_i2c_target(txns, spec=SPEC_100K, host_tx=(), defs=None,
             addr_toggles += 1
         if ((cpu.uo_out ^ prev_uo) >> END_TOG_BIT) & 1:
             end_toggles += 1
+            if master._last_bus_end_cyc is None or (cpu.cycle - master._last_bus_end_cyc) > 30:
+                master.violations.append(
+                    f"cyc {cpu.cycle}: uo6 END toggled without preceding STOP/Sr (last={master._last_bus_end_cyc})"
+                )
         prev_uo = cpu.uo_out
         if master.done:
             break
@@ -411,13 +435,16 @@ class TestI2CTarget(unittest.TestCase):
         self.assertEqual(end_tog, 3)
 
     def test_100k_address_mismatch_nack_and_multi_target_bus(self):
-        # Traffic to other targets (0x51, 0x20), then Sr directly to our target 0x50
+        # Traffic to another target 0x51 whose payload contains our own address byte 0xA0
+        # (with SDA falling while SCL==0), then NACKed 0x20, then Sr directly to our target 0x50
         txns = [
-            ("W", 0x51, [0xAA], True),
+            ("W", 0x51, [0xFF, 0xA0, 0x55], True),
             ("R", 0x20, 1, False),
             ("W", 0x50, [0x7E], True),
         ]
-        _, rx, master, addr_tog, end_tog = run_i2c_target(txns, spec=SPEC_100K)
+        _, rx, master, addr_tog, end_tog = run_i2c_target(
+            txns, spec=SPEC_100K, other_target_addrs=(0x51,),
+        )
         self.assertEqual(master.violations, [])
         self.assertEqual(master.results, [
             ("W", 0x51, False, []),
@@ -427,6 +454,20 @@ class TestI2CTarget(unittest.TestCase):
         self.assertEqual(rx, [0x7E])
         self.assertEqual(addr_tog, 1)
         self.assertEqual(end_tog, 1)
+
+    def test_100k_bit0_zero_hold_all_poll_phases(self):
+        # Sweep all 9 phases of the 9-cycle bit-0 Sr/STOP poll loop with master_hd_dat=0
+        # on both 0->1 (0x40) and 1->0 (0x80) bit0->bit1 transitions: zero false STOP/Sr
+        for phase in range(9):
+            spec_p = dict(SPEC_100K, t_high=200 + phase)
+            txns = [("W", 0x50, [0x40, 0x80], True)]
+            _, rx, master, addr_tog, end_tog = run_i2c_target(
+                txns, spec=spec_p, master_hd_dat=0,
+            )
+            self.assertEqual(master.violations, [], f"phase={phase}")
+            self.assertEqual(master.results, [("W", 0x50, True, [True, True])], f"phase={phase}")
+            self.assertEqual(rx, [0x40, 0x80], f"phase={phase}")
+            self.assertEqual((addr_tog, end_tog), (1, 1), f"phase={phase}")
 
     def test_100k_clock_stretching_on_late_tx_fifo(self):
         # Host supplies Read bytes late (after master already released SCL -> target stretches SCL)
