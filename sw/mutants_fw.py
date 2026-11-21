@@ -188,6 +188,55 @@ mut("I15", X, "    PINS float uio2 @RS_LOW       ; SCL rises; SDA is already rel
     "    PINS float uio3 @RS_LOW       ; SCL rises; SDA is already released (high)", "Sr releases SDA instead of raising SCL")
 mut("I16", X, "    MOV c1, sr @2\n    PINS float uio2 @RS_LOW", "    NOP @2\n    PINS float uio2 @RS_LOW", "Sr loses the R/W bit (c1 stale)")
 
+# ------------------------------------------------------------------ i2c_target.asm (WP4a)
+X = "examples/i2c_target.asm"
+mut("S1", X, ".default THD_DAT, 15", ".default THD_DAT, 14",
+    "internal SDA hold 280 ns < 300 ns UM10204 Note (off by 1 cycle)")
+mut("S2", X, ".default TSU_DAT, 13", ".default TSU_DAT, 12",
+    "100 kHz TX byte-boundary setup 240 ns < 250 ns (off by 1 cycle)")
+mut("S3", X, "    JLO  uio2, wait_start @2", "    NOP @2",
+    "START detect ignores SCL==0 (triggers on data edges)")
+mut("S4", X, "    ANDI sr, 0xFE @2            ; mask 7-bit address", "    NOP @2                      ; mask 7-bit address",
+    "R/W bit not masked during 7-bit address compare")
+mut("S5", X, "    XORI sr, (ADDR << 1) @2     ; zero iff address matches",
+    "    XORI sr, ((ADDR ^ 1) << 1) @2 ; zero iff address matches", "wrong 7-bit address compare")
+mut("S6", X, "    ADDI sr, 1 @2               ; 1 iff match -> DJNZ falls through",
+    "    ADDI sr, 2 @2               ; 1 iff match -> DJNZ falls through", "address zero-compare off by one")
+mut("S7", X, "    DJNZ c0, wait_start @2      ; mismatch: leave SDA floated (NACK), wait for next START/Sr",
+    "    NOP @2                      ; mismatch: leave SDA floated (NACK), wait for next START/Sr",
+    "ACKs every address even on mismatch")
+mut("S8", X, "    PINS low uio3 @2            ; ACK on pad at T_f+27 (540 ns)",
+    "    NOP @2                      ; ACK on pad at T_f+27 (540 ns)", "missing address ACK")
+mut("S9", X, "    JSB  sr[0]==1, tx_byte @2   ; R/W == 1 -> Read (tx_byte WAIT low armed at T_r+11)",
+    "    JSB  sr[1]==1, tx_byte @2   ; R/W == 1 -> Read (tx_byte WAIT low armed at T_r+11)",
+    "R/W bit tested on bit 1 instead of bit 0")
+mut("S10", X, "    JLO  uio2, rx_b0_done @2    ; confirm SCL still high (prevents false STOP at t_HD;DAT=0)",
+    "    NOP @2                      ; confirm SCL still high (prevents false STOP at t_HD;DAT=0)",
+    "missing SCL-high confirm on bit-0 STOP poll")
+mut("S11", X, "    JLO  uio2, rx_b0_done @2    ; confirm SCL still high (prevents false Sr at t_HD;DAT=0)",
+    "    NOP @2                      ; confirm SCL still high (prevents false Sr at t_HD;DAT=0)",
+    "missing SCL-high confirm on bit-0 Sr poll")
+mut("S12", X, "    PINS toggle uo6 @2          ; STOP confirmed: end of matched transaction",
+    "    NOP @2                      ; STOP confirmed: end of matched transaction",
+    "STOP end flag uo6 not toggled")
+mut("S13", X, "    PINS toggle uo6 @2          ; Repeated START confirmed: end previous transfer, start next\n    JMP  got_start @2",
+    "    PINS toggle uo6 @2          ; Repeated START confirmed: end previous transfer, start next\n    JMP  wait_start @2",
+    "Sr after Write jumps to wait_start and misses next address")
+mut("S14", X, "    HPUSH @2                    ; T_f+8", "    NOP @2                      ; T_f+8",
+    "received write byte not pushed to RX FIFO")
+mut("S15", X, "    PINS low uio2 @2            ; stretch SCL on pad at T_f+6 (120 ns)",
+    "    NOP @2                      ; stretch SCL on pad at T_f+6 (120 ns)",
+    "no clock stretching during TX HPULL")
+mut("S16", X, "    SHOUT uio3 msb shift od @THD_DAT-4 ; commits T_f+THD_DAT-1 -> pad SDA valid at T_f+THD_DAT (300 ns)",
+    "    SHOUT uio3 msb shift @THD_DAT-4 ; commits T_f+THD_DAT-1 -> pad SDA valid at T_f+THD_DAT (300 ns)",
+    "TX bit loop drives SDA push-pull instead of open-drain")
+mut("S17", X, "    JLO  uio3, tx_byte @2       ; master ACK (SDA==0) -> next TX byte (WAIT low armed T_r+11)",
+    "    NOP @2                      ; master ACK (SDA==0) -> next TX byte (WAIT low armed T_r+11)",
+    "ignores master ACK on multi-byte Read")
+mut("S18", X, "    WAIT low uio2 @2\n    WAIT rise uio2 @2\n    JHI  uio3, tx_end_hi @2",
+    "    WAIT low uio2 @2\n    WAIT rise uio2 @2\n    NOP @2",
+    "Sr after Read NACK treated as STOP")
+
 
 def apply(tmp_sw, rel, old, new):
     path = os.path.join(tmp_sw, rel)
