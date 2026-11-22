@@ -8,7 +8,7 @@
 PY       ?= python3
 ASMFLAGS ?=
 BUILD    ?= build
-EXAMPLES := uart_tx uart_rx spi_master i2c_master i2c_target usb_rx usb_tx usb_device_ack
+EXAMPLES := uart_tx uart_rx spi_master spi_slave i2c_master i2c_target usb_rx usb_tx usb_device_ack
 
 .PHONY: images test clean
 
