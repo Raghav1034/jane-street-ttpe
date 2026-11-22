@@ -18,28 +18,34 @@
 ;     the host must preload the TX FIFO before the Read byte boundary so HPULL does not stall
 ;     SCL past t_LOW.
 ;
-; Parameters (assemble with -D ADDR=0x50 -D THD_DAT=15 -D TSU_DAT=13):
+; Parameters (assemble with -D ADDR=0x50 -D THD_DAT=15 -D TSU_DAT=65):
 ;   ADDR     7-bit target address (default 0x50; matches byte[7:1] == ADDR).
 ;   THD_DAT  internal SDA hold cycles after SCL falling edge (default 15 = 300 ns at 50 MHz;
 ;            must be >= 12 so @THD_DAT-10 >= 2). Required by NXP UM10204 Table 10/11 Note:
 ;            "A device must internally provide a hold time of at least 300 ns for the SDA
 ;            signal (referred to the VIH(min) of the SCL signal) to bridge the undefined
 ;            region of the falling edge of SCL."
-;   TSU_DAT  data setup cycles from SDA valid to SCL release on TX byte-boundary stretch:
-;            default 13 (260 ns >= 250 ns t_SU;DAT for 100 kHz Standard-mode);
-;            for 400 kHz Fast-mode assemble with -D TSU_DAT=6 (120 ns >= 100 ns t_SU;DAT).
+;   TSU_DAT  data setup cycles from target SDA release to SCL release on TX byte-boundary
+;            stretch (instruction delta @TSU_DAT-1; must satisfy THD_DAT + TSU_DAT < t_LOW
+;            so preloaded reads do not stretch):
+;            * 100 kHz Standard-mode default: TSU_DAT=65 (1300 ns; @64). Covers worst-case
+;              UM10204 SDA rise time t_r=1000 ns (50 cyc) + t_SU;DAT min 250 ns (13 cyc)
+;              with +50 ns margin even at t_r(SCL)=0; THD_DAT+TSU_DAT = 80 cyc << 235 t_LOW.
+;            * 400 kHz Fast-mode: assemble with -D TSU_DAT=22 (440 ns; @21). Covers worst-case
+;              t_r=300 ns (15 cyc) + t_SU;DAT min 100 ns (5 cyc) with +40 ns margin even at
+;              t_r(SCL)=0; THD_DAT+TSU_DAT = 37 cyc < 65 t_LOW.
 ;
 ; Known hardware limits:
 ;   * No input spike filter: TTPE uses a 2-flop synchroniser (no 50 ns Fast-mode t_SP filter).
-;   * Default build is 100 kHz Standard-mode. 400 kHz Fast-mode (-D TSU_DAT=6) is model-feasible
-;     in cycle arithmetic, NOT proven on a real bus (worst-case 300 ns bus t_r/t_f consumes most
+;   * Default build is 100 kHz Standard-mode. 400 kHz Fast-mode (-D TSU_DAT=22) is model-feasible
+;     in cycle arithmetic, NOT proven on a real bus (worst-case 300 ns bus t_f consumes most
 ;     of the 360 ns address-match t_VD;ACK margin). 1 MHz Fast-mode Plus (Fm+) is infeasible.
 ;   * Sr / STOP polling runs on bit 0 of every data byte (all legal I2C byte boundaries) and
 ;     after a master NACK on Read; illegal mid-byte Sr/STOP on bits 1..7 is not polled.
 
 .default ADDR,    0x50
 .default THD_DAT, 15            ; 300 ns internal SDA hold after SCL fall (UM10204 Note; >= 12)
-.default TSU_DAT, 13            ; 260 ns SDA setup before SCL release (100 kHz >= 250 ns; 400 kHz: 6)
+.default TSU_DAT, 65            ; 1300 ns SDA setup before SCL release (100 kHz >= 1000+250 ns; 400 kHz: 22)
 
 start:
     PINS float uio2 uio3 @2     ; release SCL and SDA (idle bus)

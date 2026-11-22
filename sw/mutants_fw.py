@@ -192,8 +192,8 @@ mut("I16", X, "    MOV c1, sr @2\n    PINS float uio2 @RS_LOW", "    NOP @2\n   
 X = "examples/i2c_target.asm"
 mut("S1", X, ".default THD_DAT, 15", ".default THD_DAT, 14",
     "internal SDA hold 280 ns < 300 ns UM10204 Note (off by 1 cycle)")
-mut("S2", X, ".default TSU_DAT, 13", ".default TSU_DAT, 12",
-    "100 kHz TX byte-boundary setup 240 ns < 250 ns (off by 1 cycle)")
+mut("S2", X, ".default TSU_DAT, 65", ".default TSU_DAT, 62",
+    "100 kHz TX byte-boundary setup 1240 ns < 1250 ns (1000 ns t_r + 250 ns t_SU;DAT, off by 1 cycle)")
 mut("S3", X, "    JLO  uio2, wait_start @2", "    NOP @2",
     "START detect ignores SCL==0 (triggers on data edges)")
 mut("S4", X, "    ANDI sr, 0xFE @2            ; mask 7-bit address", "    NOP @2                      ; mask 7-bit address",

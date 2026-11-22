@@ -72,13 +72,24 @@ class IndependentI2CMaster:
     Transaction list format:
       ("W", addr7, [b0, b1, ...], stop_bool)   -> write bytes; stop_bool=False ends for Sr
       ("R", addr7, n_bytes,       stop_bool)   -> read n_bytes; stop_bool=False ends for Sr
+
+    Rise/fall time modeling:
+      t_r      shorthand setting both t_r_scl and t_r_sda when not specified separately
+      t_r_scl  SCL 0->1 rise time in cycles (open-drain release to V_IH)
+      t_r_sda  SDA 0->1 rise time in cycles (open-drain release to V_IH)
+      t_f_sda  SDA 1->0 fall time in cycles (open-drain pull-down to V_IL)
+    t_HD;DAT is checked at the earliest target driver transition; t_SU;DAT, t_VD;ACK,
+    and t_VD;DAT are checked on the settled physical bus_sda / bus_scl waveforms.
     """
 
-    def __init__(self, txns, spec=SPEC_100K, t_r=0, jitter=0, seed=1,
-                 allow_stretch=True, master_hd_dat=0, idle_lead=20):
+    def __init__(self, txns, spec=SPEC_100K, t_r=0, t_r_scl=None, t_r_sda=None, t_f_sda=0,
+                 jitter=0, seed=1, allow_stretch=True, master_hd_dat=0, idle_lead=20):
         self.txns = list(txns)
         self.spec = dict(spec)
-        self.t_r = t_r
+        self.t_r_scl = t_r if t_r_scl is None else t_r_scl
+        self.t_r_sda = t_r if t_r_sda is None else t_r_sda
+        self.t_f_sda = t_f_sda
+        self.t_r = self.t_r_scl
         self.jitter = jitter
         self.rng = random.Random(seed)
         self.allow_stretch = allow_stretch
@@ -88,9 +99,11 @@ class IndependentI2CMaster:
         self.m_scl = True
         self.m_sda = True
 
-        # Rise-time filter state for SCL and SDA
-        self._scl_rel_cnt = t_r
-        self._sda_rel_cnt = t_r
+        # Rise/fall-time filter state for SCL and SDA
+        self._scl_rel_cnt = self.t_r_scl
+        self._sda_rel_cnt = self.t_r_sda
+        self._sda_fall_cnt = self.t_f_sda
+        self._sda_in_transition = False
         self.bus_scl = 1
         self.bus_sda = 1
         self.prev_bus_scl = 1
@@ -106,11 +119,13 @@ class IndependentI2CMaster:
         self._scl_rise_cyc = None
         self._last_bus_end_cyc = None   # last STOP (SDA 0->1 while SCL=1) or Sr (SDA 1->0 while SCL=1)
         self._target_sda_change_cyc = None
+        self._bus_sda_change_cyc = None
         self._target_prev_drive_low = False
         self._target_owns_sda = False
         self._check_vd_kind = None  # "ACK" or "DAT"
+        self._vd_pending = False
+        self._vd_target_low = False
         self._was_stretched = False
-        self._vd_checked = False
         self.other_target_addrs = set()
 
         # Transaction generator coroutine
@@ -137,7 +152,7 @@ class IndependentI2CMaster:
             if self.bus_scl == 1:
                 break
             # If master released SCL and rise time elapsed, target is stretching
-            if self._scl_rel_cnt >= self.t_r:
+            if self._scl_rel_cnt >= self.t_r_scl:
                 if not self.allow_stretch:
                     self.violations.append(
                         f"cyc {self._cycle}: target stretched SCL when allow_stretch=False"
@@ -166,16 +181,24 @@ class IndependentI2CMaster:
         s = self.spec
         self._target_owns_sda = True
         self._check_vd_kind = kind
-        self._vd_checked = False
+        self._vd_pending = False
         self._was_stretched = False
         self.m_sda = True
         yield from self._hold_cycles(self._jit(s["t_low"]))
         yield from self._release_scl_and_wait()
         sampled = self.bus_sda
-        # Check t_SU;DAT on exact physical wire SCL rise cycle minus target SDA change cycle
-        if self._target_sda_change_cyc is not None and self._scl_fall_cyc is not None and self._scl_rise_cyc is not None:
+        # Check t_SU;DAT on settled physical wire bus_sda (including t_r_sda / t_f_sda)
+        # versus exact physical wire bus_scl rising edge.
+        if self._sda_in_transition:
+            self.violations.append(
+                f"cyc {self._scl_rise_cyc}: {kind} t_SU;DAT violated (bus_sda still transitioning when SCL rose)"
+            )
+        elif self._target_sda_change_cyc is not None and self._scl_fall_cyc is not None and self._scl_rise_cyc is not None:
             if self._target_sda_change_cyc >= self._scl_fall_cyc:
-                su = self._scl_rise_cyc - self._target_sda_change_cyc
+                settled_cyc = self._target_sda_change_cyc
+                if self._bus_sda_change_cyc is not None and self._bus_sda_change_cyc >= self._target_sda_change_cyc:
+                    settled_cyc = self._bus_sda_change_cyc
+                su = self._scl_rise_cyc - settled_cyc
                 if su < s["t_su_dat_min"]:
                     self.violations.append(
                         f"cyc {self._scl_rise_cyc}: {kind} t_SU;DAT={su} cyc < {s['t_su_dat_min']}"
@@ -183,6 +206,7 @@ class IndependentI2CMaster:
         yield from self._hold_cycles(self._jit(s["t_high"]) - 1)
         self._target_owns_sda = False
         self._check_vd_kind = None
+        self._vd_pending = False
         self.m_scl = False
         return sampled
 
@@ -293,7 +317,7 @@ class IndependentI2CMaster:
             self._started = True
         next(self._gen)
 
-        # Recompute wired-AND bus levels with optional rise-time t_r
+        # Recompute wired-AND bus levels with optional rise/fall times (t_r_scl, t_r_sda, t_f_sda)
         raw_scl_low = (not self.m_scl) or t_scl_low
         raw_sda_low = (not self.m_sda) or t_sda_low
 
@@ -301,37 +325,49 @@ class IndependentI2CMaster:
             self._scl_rel_cnt = 0
             new_scl = 0
         else:
-            if self._scl_rel_cnt < self.t_r:
+            if self.bus_scl == 0 and self._scl_rel_cnt < self.t_r_scl:
                 self._scl_rel_cnt += 1
                 new_scl = 0
             else:
+                self._scl_rel_cnt = self.t_r_scl
                 new_scl = 1
 
         if raw_sda_low:
             self._sda_rel_cnt = 0
-            new_sda = 0
+            if self.bus_sda == 1 and self._sda_fall_cnt < self.t_f_sda:
+                self._sda_fall_cnt += 1
+                new_sda = 1
+            else:
+                self._sda_fall_cnt = self.t_f_sda
+                new_sda = 0
         else:
-            if self._sda_rel_cnt < self.t_r:
+            self._sda_fall_cnt = 0
+            if self.bus_sda == 0 and self._sda_rel_cnt < self.t_r_sda:
                 self._sda_rel_cnt += 1
                 new_sda = 0
             else:
+                self._sda_rel_cnt = self.t_r_sda
                 new_sda = 1
 
         self.prev_bus_scl, self.prev_bus_sda = self.bus_scl, self.bus_sda
         self.bus_scl, self.bus_sda = new_scl, new_sda
+        expected_sda = 0 if raw_sda_low else 1
+        self._sda_in_transition = (self.bus_sda != expected_sda)
 
         if self.prev_bus_scl == 1 and self.bus_scl == 0:
             self._scl_fall_cyc = cycle
             self._was_stretched = False
         if self.prev_bus_scl == 0 and self.bus_scl == 1:
             self._scl_rise_cyc = cycle
+        if self.bus_sda != self.prev_bus_sda:
+            self._bus_sda_change_cyc = cycle
         if self.bus_scl == 1 and self.prev_bus_scl == 1 and self.bus_sda != self.prev_bus_sda:
             self._last_bus_end_cyc = cycle
 
         if t_scl_low and self.m_scl:
             self._was_stretched = True
 
-        # Monitor target SDA transitions for t_HD;DAT, t_VD;ACK, t_VD;DAT, and glitch during SCL=1
+        # Monitor target SDA driver transitions for t_HD;DAT and illegal SCL=1 glitch
         if t_sda_low != self._target_prev_drive_low:
             self._target_prev_drive_low = t_sda_low
             self._target_sda_change_cyc = cycle
@@ -343,16 +379,24 @@ class IndependentI2CMaster:
                     self.violations.append(
                         f"cyc {cycle}: target changed SDA at SCL_fall+{dt} < t_HD;DAT={self.spec['t_hd_dat_min']}"
                     )
-                if self._check_vd_kind == "ACK" and t_sda_low and not self._was_stretched:
-                    if dt > self.spec["t_vd_ack_max"]:
-                        self.violations.append(
-                            f"cyc {cycle}: t_VD;ACK={dt} > {self.spec['t_vd_ack_max']}"
-                        )
-                if self._check_vd_kind == "DAT" and not self._was_stretched:
-                    if dt > self.spec["t_vd_dat_max"]:
-                        self.violations.append(
-                            f"cyc {cycle}: t_VD;DAT={dt} > {self.spec['t_vd_dat_max']}"
-                        )
+                if self._check_vd_kind in ("ACK", "DAT") and not self._was_stretched:
+                    self._vd_pending = True
+                    self._vd_target_low = t_sda_low
+
+        # Check t_VD;ACK / t_VD;DAT on the settled physical wire bus_sda (includes t_r_sda / t_f_sda)
+        if self._vd_pending and not self._sda_in_transition and self._scl_fall_cyc is not None:
+            dt_settled = cycle - self._scl_fall_cyc
+            if self._check_vd_kind == "ACK" and self._vd_target_low and not self._was_stretched:
+                if dt_settled > self.spec["t_vd_ack_max"]:
+                    self.violations.append(
+                        f"cyc {cycle}: t_VD;ACK={dt_settled} > {self.spec['t_vd_ack_max']}"
+                    )
+            if self._check_vd_kind == "DAT" and not self._was_stretched:
+                if dt_settled > self.spec["t_vd_dat_max"]:
+                    self.violations.append(
+                        f"cyc {cycle}: t_VD;DAT={dt_settled} > {self.spec['t_vd_dat_max']}"
+                    )
+            self._vd_pending = False
 
         uio_in = 0xFF
         if self.bus_scl == 0:
@@ -367,13 +411,14 @@ class IndependentI2CMaster:
 
 
 def run_i2c_target(txns, spec=SPEC_100K, host_tx=(), defs=None,
-                   t_r=0, jitter=0, seed=1, allow_stretch=True,
+                   t_r=0, t_r_scl=None, t_r_sda=None, t_f_sda=0,
+                   jitter=0, seed=1, allow_stretch=True,
                    master_hd_dat=0, other_target_addrs=(), max_cycles=250000):
     words = assemble_target(**(defs or {}))
     cpu = iss.Ttpe(words, host_tx=list(host_tx))
     master = IndependentI2CMaster(
-        txns, spec=spec, t_r=t_r, jitter=jitter, seed=seed,
-        allow_stretch=allow_stretch, master_hd_dat=master_hd_dat,
+        txns, spec=spec, t_r=t_r, t_r_scl=t_r_scl, t_r_sda=t_r_sda, t_f_sda=t_f_sda,
+        jitter=jitter, seed=seed, allow_stretch=allow_stretch, master_hd_dat=master_hd_dat,
     )
     master.other_target_addrs = set(other_target_addrs)
     addr_toggles = 0
@@ -492,20 +537,24 @@ class TestI2CTarget(unittest.TestCase):
         self.assertEqual(master.results, [("R", 0x50, True, [0x11, 0x22, 0x33])])
         self.assertEqual(master.stretch_events, 0)
 
-    def test_100k_with_rise_time_and_jitter(self):
-        # Model 500 ns rise time (25 cycles) + random jitter up to 10 cycles + t_HD;DAT=0
+    def test_100k_with_worst_case_asymmetric_rise_time_and_jitter(self):
+        # Worst-case UM10204 Standard-mode SDA rise time (1000 ns = 50 cyc) with fast SCL (t_r_scl=0),
+        # exercising TX byte-boundary stretch (0->1 from address ACK into 0xAA bit 7 = 1).
+        # With default TSU_DAT=65 (1300 ns), settled t_SU;DAT = 65 - 50 = 15 cyc (300 ns >= 250 ns).
         txns = [
             ("W", 0x50, [0x00, 0xFF, 0x80, 0x01], False),
             ("R", 0x50, 3, True),
         ]
         _, rx, master, _, _ = run_i2c_target(
-            txns, spec=SPEC_100K, host_tx=[0xFE, 0x01, 0x80],
-            t_r=25, jitter=10, seed=7, master_hd_dat=0,
+            txns, spec=SPEC_100K,
+            host_tx=[(28000, 0xAA), (34000, 0x81), (40000, 0xFE)],
+            t_r_scl=0, t_r_sda=50, t_f_sda=15, jitter=10, seed=7, master_hd_dat=0,
         )
         self.assertEqual(master.violations, [])
         self.assertEqual(master.results[0], ("W", 0x50, True, [True] * 4))
-        self.assertEqual(master.results[1], ("R", 0x50, True, [0xFE, 0x01, 0x80]))
+        self.assertEqual(master.results[1], ("R", 0x50, True, [0xAA, 0x81, 0xFE]))
         self.assertEqual(rx, [0x00, 0xFF, 0x80, 0x01])
+        self.assertEqual(master.stretch_events, 3)
 
     def test_100k_rx_fifo_overflow_documented_behaviour(self):
         # 10-byte write into 8-deep RX FIFO: target ACKs all 10, first 8 kept, rx_overrun == 2
@@ -518,27 +567,39 @@ class TestI2CTarget(unittest.TestCase):
         self.assertEqual(cpu.rx_overrun, 2)
 
     def test_400k_model_feasible_parameterized_build(self):
-        # 400 kHz Fast-mode (-D TSU_DAT=6): model-feasible at spec mins with 0-ns master t_HD;DAT,
-        # Sr, STOP, and late-TX clock stretching
+        # 400 kHz Fast-mode (-D TSU_DAT=22): model-feasible at spec mins with worst-case
+        # UM10204 Fast-mode SDA t_r=300 ns (15 cyc), t_f=300 ns (15 cyc), t_r_scl=0,
+        # 0-ns master t_HD;DAT, Sr, STOP, and late-TX clock stretching.
         txns = [
             ("W", 0x2A, [0x00, 0xFF, 0x55], False),
             ("R", 0x2A, 2, True),
             ("W", 0x2A, [0xA0], True),
         ]
         _, rx, master, addr_tog, end_tog = run_i2c_target(
-            txns, spec=SPEC_400K, defs=dict(ADDR=0x2A, TSU_DAT=6),
-            host_tx=[(5000, 0x81), (8000, 0x7E)], jitter=3, seed=11, master_hd_dat=0,
+            txns, spec=SPEC_400K, defs=dict(ADDR=0x2A, TSU_DAT=22),
+            host_tx=[(5500, 0x81), (8500, 0xFE)],
+            t_r_scl=0, t_r_sda=15, t_f_sda=15, jitter=3, seed=11, master_hd_dat=0,
         )
         self.assertEqual(master.violations, [])
         self.assertEqual(master.results, [
             ("W", 0x2A, True, [True, True, True]),
-            ("R", 0x2A, True, [0x81, 0x7E]),
+            ("R", 0x2A, True, [0x81, 0xFE]),
             ("W", 0x2A, True, [True]),
         ])
         self.assertEqual(rx, [0x00, 0xFF, 0x55, 0xA0])
-        self.assertGreaterEqual(master.stretch_events, 1)
+        self.assertEqual(master.stretch_events, 2)
         self.assertEqual(addr_tog, 3)
         self.assertEqual(end_tog, 3)
+
+        # Also verify preloaded 400 kHz build with TSU_DAT=22 (THD_DAT+TSU_DAT=37 < t_LOW=65)
+        # does NOT stretch SCL when allow_stretch=False.
+        _, _, m_nostr, _, _ = run_i2c_target(
+            [("R", 0x2A, 2, True)], spec=SPEC_400K, defs=dict(ADDR=0x2A, TSU_DAT=22),
+            host_tx=[0x81, 0xFE], t_r_scl=0, t_r_sda=15, t_f_sda=15, allow_stretch=False,
+        )
+        self.assertEqual(m_nostr.violations, [])
+        self.assertEqual(m_nostr.results, [("R", 0x2A, True, [0x81, 0xFE])])
+        self.assertEqual(m_nostr.stretch_events, 0)
 
     def test_zero_byte_write_then_sr_and_stop(self):
         # Address write immediately followed by Sr (0 data bytes) and address write followed by STOP
@@ -557,30 +618,50 @@ class TestI2CTarget(unittest.TestCase):
         self.assertEqual(end_tog, 2)
 
     def test_negative_controls_timing_checker_catches_violations(self):
-        # 1) Using 400 kHz TSU_DAT=6 (120 ns) under 100 kHz spec (250 ns min) with clock stretch MUST fail t_SU;DAT
-        #    (0xAA has MSB=1 so SDA transitions 0->1 from address ACK 6 cycles before SCL release)
+        # 1) Using TSU_DAT=12 (240 ns) under 100 kHz spec (250 ns min) at t_r=0 MUST fail t_SU;DAT
         _, _, m_su, _, _ = run_i2c_target(
-            [("R", 0x50, 1, True)], spec=SPEC_100K, defs=dict(TSU_DAT=6),
+            [("R", 0x50, 1, True)], spec=SPEC_100K, defs=dict(TSU_DAT=12),
             host_tx=[(6500, 0xAA)], allow_stretch=True,
         )
         self.assertTrue(any("t_SU;DAT" in v for v in m_su.violations), m_su.violations)
 
-        # 2) Reducing THD_DAT=12 (240 ns < 300 ns UM10204 Note) MUST fail t_HD;DAT
+        # 2) Under worst-case 100 kHz t_r_sda=50 (1000 ns), t_r_scl=0:
+        #    both old TSU_DAT=13 and off-by-1 TSU_DAT=62 (62-50=12 < 13) MUST fail t_SU;DAT
+        _, _, m_tr100_old, _, _ = run_i2c_target(
+            [("R", 0x50, 1, True)], spec=SPEC_100K, defs=dict(TSU_DAT=13),
+            host_tx=[(6500, 0xAA)], t_r_scl=0, t_r_sda=50, allow_stretch=True,
+        )
+        self.assertTrue(any("t_SU;DAT" in v for v in m_tr100_old.violations), m_tr100_old.violations)
+
+        _, _, m_tr100_62, _, _ = run_i2c_target(
+            [("R", 0x50, 1, True)], spec=SPEC_100K, defs=dict(TSU_DAT=62),
+            host_tx=[(6500, 0xAA)], t_r_scl=0, t_r_sda=50, allow_stretch=True,
+        )
+        self.assertTrue(any("t_SU;DAT" in v for v in m_tr100_62.violations), m_tr100_62.violations)
+
+        # 3) Under worst-case 400 kHz t_r_sda=15 (300 ns), t_r_scl=0: old TSU_DAT=6 MUST fail t_SU;DAT
+        _, _, m_tr400_old, _, _ = run_i2c_target(
+            [("R", 0x50, 1, True)], spec=SPEC_400K, defs=dict(TSU_DAT=6),
+            host_tx=[(3000, 0xAA)], t_r_scl=0, t_r_sda=15, allow_stretch=True,
+        )
+        self.assertTrue(any("t_SU;DAT" in v for v in m_tr400_old.violations), m_tr400_old.violations)
+
+        # 4) Reducing THD_DAT=12 (240 ns < 300 ns UM10204 Note) MUST fail t_HD;DAT
         _, _, m_hd, _, _ = run_i2c_target(
             [("W", 0x50, [0x55], True)], spec=SPEC_100K, defs=dict(THD_DAT=12),
         )
         self.assertTrue(any("t_HD;DAT" in v for v in m_hd.violations), m_hd.violations)
 
-        # 3) Late TX FIFO with allow_stretch=False MUST flag stretch violation
+        # 5) Late TX FIFO with allow_stretch=False MUST flag stretch violation
         _, _, m_st, _, _ = run_i2c_target(
             [("R", 0x50, 1, True)], spec=SPEC_100K, host_tx=[(6500, 0x55)], allow_stretch=False,
         )
         self.assertTrue(any("stretched SCL" in v for v in m_st.violations), m_st.violations)
 
-        # 4) Tightening t_vd_ack_max to 20 cycles (< 27 cycles address-match ACK) MUST flag t_VD;ACK
+        # 6) Tightening t_vd_ack_max to 20 cycles (< 27 cycles address-match ACK) MUST flag t_VD;ACK
         tight = dict(SPEC_400K, t_vd_ack_max=20)
         _, _, m_vd, _, _ = run_i2c_target(
-            [("W", 0x50, [0x55], True)], spec=tight, defs=dict(TSU_DAT=6),
+            [("W", 0x50, [0x55], True)], spec=tight, defs=dict(TSU_DAT=22),
         )
         self.assertTrue(any("t_VD;ACK" in v for v in m_vd.violations), m_vd.violations)
 
