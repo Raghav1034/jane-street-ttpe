@@ -237,6 +237,57 @@ mut("S18", X, "    WAIT low uio2 @2\n    WAIT rise uio2 @2\n    JHI  uio3, tx_en
     "    WAIT low uio2 @2\n    WAIT rise uio2 @2\n    NOP @2",
     "Sr after Read NACK treated as STOP")
 
+# ------------------------------------------------------------------ spi_slave.asm (WP4b)
+X = "examples/spi_slave.asm"
+mut("Q1", X, ".macro WAIT_LEAD\n.if CPOL == 0\n    WAIT rise uio3 @2",
+    ".macro WAIT_LEAD\n.if CPOL == 0\n    WAIT fall uio3 @2",
+    "WAIT_LEAD CPOL=0 inverted to fall")
+mut("Q2", X, ".macro WAIT_TRAIL\n.if CPOL == 0\n    WAIT fall uio3 @2",
+    ".macro WAIT_TRAIL\n.if CPOL == 0\n    WAIT rise uio3 @2",
+    "WAIT_TRAIL CPOL=0 inverted to rise")
+mut("Q3", X, ".macro JMP_SCK_IDLE target\n.if CPOL == 0\n    JLO  uio3, \\target @2",
+    ".macro JMP_SCK_IDLE target\n.if CPOL == 0\n    JHI  uio3, \\target @2",
+    "CPHA=1 SCK idle poll polarity inverted for CPOL=0")
+mut("Q4", X, "    PINS float uio2 @2          ; MISO Hi-Z while idle",
+    "    PINS low uio2 @2            ; MISO Hi-Z while idle",
+    "drives MISO low while idle instead of Hi-Z")
+mut("Q5", X, "    SHOUT uio2 msb @2           ; commits T_cs+5 -> MISO bit 7 valid on pad at T_cs+6 (120 ns)",
+    "    NOP @2                      ; commits T_cs+5 -> MISO bit 7 valid on pad at T_cs+6 (120 ns)",
+    "CPHA=0 omits pre-first-edge MISO bit 7 drive")
+mut("Q6", X, "    LDI  c0, 5 @2               ; commits T_L0+8 (bits 6, 5, 4, 3, 2)",
+    "    LDI  c0, 4 @2               ; commits T_L0+8 (bits 6, 5, 4, 3, 2)",
+    "CPHA=0 bit loop count off by 1")
+mut("Q7", X, "    DJNZ c1, b1_more @2         ; commits T_L6+8; taken if more bytes remain, fall-through if last byte",
+    "    NOP @2                      ; commits T_L6+8; taken if more bytes remain, fall-through if last byte",
+    "CPHA=0 ignores multi-byte frame count c1")
+mut("Q8", X, "    PINS float uio2 @2          ; commits T_cs_hi+5 -> MISO Hi-Z on pad at T_cs_hi+6 (120 ns)",
+    "    NOP @2                      ; commits T_cs_hi+5 -> MISO Hi-Z on pad at T_cs_hi+6 (120 ns)",
+    "CPHA=0 does not tri-state MISO on CS_N rise")
+mut("Q9", X, "    PINS toggle uo6 @2          ; frame-end marker\n    JMP  idle @2                ; next frame (MISO already floated)",
+    "    NOP @2                      ; frame-end marker\n    JMP  idle @2                ; next frame (MISO already floated)",
+    "CPHA=0 omits uo6 frame-end toggle")
+mut("Q10", X, "    HPUSH @2                    ; commits T_L7+8\n    HPULL @2                    ; commits T_L7+11 -> SR = TX byte k+1 (must be preloaded)",
+    "    NOP @2                      ; commits T_L7+8\n    HPULL @2                    ; commits T_L7+11 -> SR = TX byte k+1 (must be preloaded)",
+    "CPHA=0 drops non-final RX byte in multi-byte frame")
+mut("Q11", X, "    JHI  uio0, frame_end @2     ; CS_N high -> release MISO & finish frame",
+    "    NOP @2                      ; CS_N high -> release MISO & finish frame",
+    "CPHA=1 poll loop never detects CS_N rise")
+mut("Q12", X, "    LDI  c0, 6 @2               ; commits T_T0+8 (bits 6, 5, 4, 3, 2, 1)",
+    "    LDI  c0, 5 @2               ; commits T_T0+8 (bits 6, 5, 4, 3, 2, 1)",
+    "CPHA=1 bit loop count off by 1")
+mut("Q13", X, "    SHOUT uio2 msb @2           ; commits <= T_L0+16 -> MISO bit 7 on pad <= T_L0+17 (340 ns)",
+    "    NOP @2                      ; commits <= T_L0+16 -> MISO bit 7 on pad <= T_L0+17 (340 ns)",
+    "CPHA=1 omits bit-7 MISO drive")
+mut("Q14", X, "    HPUSH @2                    ; commits T_T7+8\n    JMP  poll_byte @2           ; taken (+3): JHI uio0 at T_T7+17, JMP_SCK_IDLE at T_T7+20",
+    "    NOP @2                      ; commits T_T7+8\n    JMP  poll_byte @2           ; taken (+3): JHI uio0 at T_T7+17, JMP_SCK_IDLE at T_T7+20",
+    "CPHA=1 drops RX byte")
+mut("Q15", X, "    PINS float uio2 @2          ; MISO Hi-Z (<= T_cs_hi+17 = 340 ns; <= T_T7+24 if t_lag=0)",
+    "    NOP @2                      ; MISO Hi-Z (<= T_cs_hi+17 = 340 ns; <= T_T7+24 if t_lag=0)",
+    "CPHA=1 does not tri-state MISO on CS_N rise")
+mut("Q16", X, "    PINS toggle uo6 @2          ; frame-end marker\n    JMP  idle @2\n.endif",
+    "    NOP @2                      ; frame-end marker\n    JMP  idle @2\n.endif",
+    "CPHA=1 omits uo6 frame-end toggle")
+
 
 def apply(tmp_sw, rel, old, new):
     path = os.path.join(tmp_sw, rel)
