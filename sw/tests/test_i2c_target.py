@@ -23,6 +23,7 @@ if SW_DIR not in sys.path:
 import ttpe_asm as asm
 import ttpe_iss as iss
 
+MASTER_ASM_PATH = os.path.join(SW_DIR, "examples", "i2c_master.asm")
 ASM_PATH = os.path.join(SW_DIR, "examples", "i2c_target.asm")
 SCL_BIT = 2   # uio2
 SDA_BIT = 3   # uio3
@@ -664,6 +665,136 @@ class TestI2CTarget(unittest.TestCase):
             [("W", 0x50, [0x55], True)], spec=tight, defs=dict(TSU_DAT=22),
         )
         self.assertTrue(any("t_VD;ACK" in v for v in m_vd.violations), m_vd.violations)
+
+
+def assemble_master(**defs):
+    with open(MASTER_ASM_PATH, encoding="utf-8") as f:
+        src = f.read()
+    return asm.assemble(src, defines=defs).words
+
+
+def run_i2c_cross(master_tx, target_tx=(), master_defs=None, target_defs=None, max_cycles=120000):
+    """Step two ttpe_iss.Ttpe instances (i2c_master.asm <-> i2c_target.asm) on a shared
+    wired-AND open-drain bus (SCL=uio2, SDA=uio3).
+
+    Limits: both firmwares share the same author and ISS timing model, so this cross-checks
+    end-to-end interoperability and clock stretching between the two examples rather than
+    serving as an independent spec check (IndependentI2CMaster above checks UM10204 bounds).
+    """
+    m_cpu = iss.Ttpe(assemble_master(**(master_defs or {})), host_tx=list(master_tx))
+    t_cpu = iss.Ttpe(assemble_target(**(target_defs or {})), host_tx=list(target_tx))
+
+    class _StaticBus:
+        def __init__(self):
+            self.uio = 0xFF
+
+        def pads(self, _cyc, _oe, _out, _uo):
+            return self.uio, 0xFF
+
+    bus = _StaticBus()
+    violations = []
+    stretch_cycles = 0
+    master_nack_seen = False
+    target_addr_toggles = 0
+    target_end_toggles = 0
+    prev_t_uo = 0
+
+    for cyc in range(max_cycles):
+        # Open-drain discipline on SCL/SDA for both chips
+        for name, c in (("master", m_cpu), ("target", t_cpu)):
+            for bit, sig in ((SCL_BIT, "SCL"), (SDA_BIT, "SDA")):
+                if ((c.uio_oe >> bit) & 1) and ((c.uio_out >> bit) & 1):
+                    violations.append(f"cyc {cyc}: {name} drove {sig} push-pull HIGH")
+
+        m_scl_low = bool(((m_cpu.uio_oe >> SCL_BIT) & 1) and not ((m_cpu.uio_out >> SCL_BIT) & 1))
+        t_scl_low = bool(((t_cpu.uio_oe >> SCL_BIT) & 1) and not ((t_cpu.uio_out >> SCL_BIT) & 1))
+        if t_scl_low and not m_scl_low:
+            stretch_cycles += 1
+
+        m_low = m_cpu.uio_oe & ~m_cpu.uio_out & ((1 << SCL_BIT) | (1 << SDA_BIT))
+        t_low = t_cpu.uio_oe & ~t_cpu.uio_out & ((1 << SCL_BIT) | (1 << SDA_BIT))
+        bus.uio = (~(m_low | t_low)) & 0xFF
+
+        m_cpu.step(bus)
+        t_cpu.step(bus)
+
+        if (m_cpu.uo_out >> 7) & 1:
+            master_nack_seen = True
+        if ((t_cpu.uo_out ^ prev_t_uo) >> ADDR_TOG_BIT) & 1:
+            target_addr_toggles += 1
+        if ((t_cpu.uo_out ^ prev_t_uo) >> END_TOG_BIT) & 1:
+            target_end_toggles += 1
+        prev_t_uo = t_cpu.uo_out
+
+    return dict(
+        master=m_cpu,
+        target=t_cpu,
+        master_rx=[b for _, b in m_cpu.rx],
+        target_rx=[b for _, b in t_cpu.rx],
+        violations=violations,
+        stretch_cycles=stretch_cycles,
+        master_nack_seen=master_nack_seen,
+        target_addr_toggles=target_addr_toggles,
+        target_end_toggles=target_end_toggles,
+    )
+
+
+class TestI2CMasterTargetCross(unittest.TestCase):
+    def test_cross_100k_write_sr_read_with_stretch(self):
+        # 100 kHz default builds: Write 3 bytes, Repeated-START register read (with late TX
+        # forcing target clock stretch), then Write 2 bytes.
+        master_tx = [
+            0xA0, 3, 0x11, 0xA5, 0xFE,        # W 0x50 [11 A5 FE] P
+            0xA0, 0x81, 0x42,                 # W 0x50 [42] (hold for Sr)
+            0xA1, 2,                          # Sr R 0x50 2 bytes P
+            0xA0, 2, 0x99, 0x00,              # W 0x50 [99 00] P
+        ]
+        res = run_i2c_cross(
+            master_tx,
+            target_tx=[(34000, 0xDE), (41000, 0xAD)],
+            max_cycles=70000,
+        )
+        self.assertEqual(res["violations"], [])
+        self.assertFalse(res["master_nack_seen"])
+        self.assertEqual(res["target_rx"], [0x11, 0xA5, 0xFE, 0x42, 0x99, 0x00])
+        self.assertEqual(res["master_rx"], [0xDE, 0xAD])
+        self.assertEqual(res["target"].rx_overrun, 0)
+        self.assertGreater(res["stretch_cycles"], 100)
+        self.assertEqual(res["target_addr_toggles"], 4)
+        self.assertEqual(res["target_end_toggles"], 4)
+
+    def test_cross_400k_write_sr_read_and_nack(self):
+        # 400 kHz builds (TL=75, TH=50 vs TSU_DAT=22): Write + Sr Read with late-TX stretch
+        master_tx = [
+            0xA0, 2, 0x5A, 0xC3,
+            0xA0, 0x81, 0x07,
+            0xA1, 2,
+        ]
+        res = run_i2c_cross(
+            master_tx,
+            target_tx=[(10000, 0x81), (13000, 0x7E)],
+            master_defs=dict(TL=75, TH=50),
+            target_defs=dict(TSU_DAT=22),
+            max_cycles=25000,
+        )
+        self.assertEqual(res["violations"], [])
+        self.assertFalse(res["master_nack_seen"])
+        self.assertEqual(res["target_rx"], [0x5A, 0xC3, 0x07])
+        self.assertEqual(res["master_rx"], [0x81, 0x7E])
+        self.assertGreater(res["stretch_cycles"], 50)
+        self.assertEqual((res["target_addr_toggles"], res["target_end_toggles"]), (3, 3))
+
+        # Wrong address 0x51 -> target NACKs, master sets uo7=1 and sends STOP
+        res_nack = run_i2c_cross(
+            [0xA2, 1, 0x55],
+            master_defs=dict(TL=75, TH=50),
+            target_defs=dict(TSU_DAT=22),
+            max_cycles=6000,
+        )
+        self.assertEqual(res_nack["violations"], [])
+        self.assertTrue(res_nack["master_nack_seen"])
+        self.assertEqual(res_nack["target_rx"], [])
+        self.assertEqual((res_nack["target_addr_toggles"], res_nack["target_end_toggles"]), (0, 0))
 
 
 if __name__ == "__main__":
