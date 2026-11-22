@@ -52,7 +52,7 @@ jobs:
               m = d.get('metrics', d) if isinstance(d, dict) else {}
               print('--- Metrics from:', p, '---')
               for k in sorted(m):
-                  if any(t in k for t in ('timing__', 'max_slew', 'max_cap', 'max_fanout', 'clock__skew')):
+                  if any(t in k for t in ('timing__', 'max_slew', 'max_cap', 'max_fanout', 'clock__skew', 'overlap', 'drc')):
                       print(f'  {k}: {m[k]}')
               break
           " || true
