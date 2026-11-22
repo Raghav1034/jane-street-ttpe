@@ -14,12 +14,18 @@ Every scenario is checked twice:
 
 import os
 import random
+import sys
 
 import ttpe_asm as asm
 import ttpe_isa as isa
 import ttpe_world as W
 import usb_ls as U
 from ttpe_lockstep import DefaultPolicy, MAX_RX, MAX_TX
+
+_SW_TESTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sw", "tests")
+if _SW_TESTS not in sys.path:
+    sys.path.append(_SW_TESTS)
+from test_i2c_target import IndependentI2CMaster, SPEC_100K, SPEC_400K  # noqa: E402
 
 EX_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sw", "examples")
 HALT_WORD = isa.encode(isa.OPCODES["HALT"])
@@ -630,6 +636,76 @@ def scn_i2c_stretch():
     return scn_i2c(75, 50, [0xA1, 1], slave, 4000, check, "stretch_75_50")
 
 
+def scn_i2c_target_100k():
+    """i2c_target.asm (default 100 kHz, TSU_DAT=65) driven by IndependentI2CMaster with
+    worst-case UM10204 SDA rise/fall times (t_r_sda=50, t_r_scl=0, t_f_sda=15):
+      1. Multi-target traffic to 0x51 carrying our address byte 0xA0 (must NACK / ignore) + Sr
+      2. Write 2 bytes [0x42, 0x80] to 0x50 + Sr
+      3. Read 2 bytes [0xAA, 0x55] from 0x50 with late host TX forcing SCL stretch on both bytes + STOP
+    """
+    txns = [
+        ("W", 0x51, [0xA0], False),
+        ("W", 0x50, [0x42, 0x80], False),
+        ("R", 0x50, 2, True),
+    ]
+    master = IndependentI2CMaster(
+        txns, spec=SPEC_100K, t_r_scl=0, t_r_sda=50, t_f_sda=15,
+        allow_stretch=True, master_hd_dat=0,
+    )
+    master.other_target_addrs = {0x51}
+    # Late TX pushes force clock stretching on both Read bytes (including byte 0 0xAA MSB=1)
+    timed = {25600: 0xAA, 30100: 0x55}
+
+    def check(ls):
+        assert not ls.iss.illegal
+        assert master.done, "independent I2C master did not finish within cycle budget"
+        assert master.violations == [], master.violations
+        assert master.results == [
+            ("W", 0x51, False, []),
+            ("W", 0x50, True, [True, True]),
+            ("R", 0x50, True, [0xAA, 0x55]),
+        ], master.results
+        assert ls.rx_got == [0x42, 0x80], ls.rx_got
+        assert master.stretch_events == 2, master.stretch_events
+        assert usb_toggles(ls, 5) == 2, usb_toggles(ls, 5)   # uo5 ADDR match
+        assert usb_toggles(ls, 6) == 2, usb_toggles(ls, 6)   # uo6 END (Sr + STOP)
+
+    return Scenario("i2c_target_100k", pad512(example("i2c_target.asm")),
+                    master, DefaultPolicy(tx_timed=timed), 36000, check)
+
+
+def scn_i2c_target_400k():
+    """i2c_target.asm (400 kHz param: ADDR=0x2A, TSU_DAT=22) driven by IndependentI2CMaster
+    with worst-case Fast-mode SDA t_r=15, t_f=15, t_r_scl=0, jitter=3, late-TX stretch, Sr & STOP."""
+    txns = [
+        ("W", 0x2A, [0x00, 0xFF, 0x55], False),
+        ("R", 0x2A, 2, True),
+        ("W", 0x2A, [0xA0], True),
+    ]
+    master = IndependentI2CMaster(
+        txns, spec=SPEC_400K, t_r_scl=0, t_r_sda=15, t_f_sda=15,
+        jitter=3, seed=11, allow_stretch=True, master_hd_dat=0,
+    )
+    timed = {4900: 0x81, 6100: 0xFE}
+
+    def check(ls):
+        assert not ls.iss.illegal
+        assert master.done, "independent I2C master did not finish within cycle budget"
+        assert master.violations == [], master.violations
+        assert master.results == [
+            ("W", 0x2A, True, [True, True, True]),
+            ("R", 0x2A, True, [0x81, 0xFE]),
+            ("W", 0x2A, True, [True]),
+        ], master.results
+        assert ls.rx_got == [0x00, 0xFF, 0x55, 0xA0], ls.rx_got
+        assert master.stretch_events == 2, master.stretch_events
+        assert usb_toggles(ls, 5) == 3, usb_toggles(ls, 5)
+        assert usb_toggles(ls, 6) == 3, usb_toggles(ls, 6)
+
+    return Scenario("i2c_target_400k", pad512(example("i2c_target.asm", ADDR=0x2A, TSU_DAT=22)),
+                    master, DefaultPolicy(tx_timed=timed), 10500, check)
+
+
 # ------------------------------------------------------------------ random programs
 def random_program(rng, n_words=64):
     ops = ([0] * 3 + [1] * 8 + [2] * 6 + [3] * 3 + [4] * 4 + [5] * 4 + [6] * 8 + [7] * 6 +
@@ -967,6 +1043,8 @@ def examples():
         scn_i2c_rstart(250, 250, 32000),
         scn_i2c_nack(75, 50),
         scn_i2c_stretch(),
+        scn_i2c_target_100k(),
+        scn_i2c_target_400k(),
     ]
 
 
