@@ -292,7 +292,7 @@ mut("Q16", X, "    PINS toggle uo6 @2          ; frame-end marker\n    JMP  idle
 def apply(tmp_sw, rel, old, new):
     path = os.path.join(tmp_sw, rel)
     with open(path, newline="") as f:
-        s = f.read()
+        s = f.read().replace("\r\n", "\n")
     n = s.count(old)
     if n != 1:
         return "STALE (old text matches %d times)" % n
@@ -332,10 +332,10 @@ def copy_sw(tmp):
     if os.path.exists(sv_pkg):
         os.makedirs(os.path.join(tmp, "src"), exist_ok=True)
         shutil.copy2(sv_pkg, os.path.join(tmp, "src", "ttpe_isa_pkg.sv"))
-    top_py = os.path.join(HERE, "..", "test", "test_ttpe_top.py")
-    if os.path.exists(top_py):
-        os.makedirs(os.path.join(tmp, "test"), exist_ok=True)
-        shutil.copy2(top_py, os.path.join(tmp, "test", "test_ttpe_top.py"))
+    test_dir = os.path.join(HERE, "..", "test")
+    if os.path.isdir(test_dir):
+        shutil.copytree(test_dir, os.path.join(tmp, "test"),
+                        ignore=shutil.ignore_patterns("__pycache__", "sim_build", "*.pyc", "*.vcd", "*.fst", "*.xml", "*.vvp", "*.zip"))
 
 
 def run_one(item):
