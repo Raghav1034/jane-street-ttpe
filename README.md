@@ -289,7 +289,7 @@ To overcome this without violating DRC or creating design opens, a custom Tcl sc
 
 ### DRC & Sign-Off Methodology
 - **KLayout DRC Signoff:** Verified clean using the official IHP CMOS5L rule deck (`ihp-sg13cmos5l.drc`).
-- **Overlap Waiver:** Known boundary overlaps between the macro compiler boundary and standard cell rows were audited and waived in line with the IHP SRAM integration guidelines.
+- **Illegal Overlap Check (Strict, No Waiver):** Unlike the Pettit walkthrough's continuous VPWR stripe crossing the SRAM LEF `y = 39–45` Metal4 obstruction (which produces 22 waived overlaps), our discrete Metal4 bridge script produces zero illegal overlaps (`magic__illegal_overlap__count: 0`, `3_gds.txt:L16282` on `2274c73` and `3_gds.txt:L16340` on `59d914b`). `ERROR_ON_ILLEGAL_OVERLAPS: 1` is enabled and verified clear in CI (`Checker.IllegalOverlap`: `Check for Magic Illegal Overlap errors clear.`, `3_gds.txt:L13570` on `59d914b`).
 - **IR Drop:** Verified through OpenROAD `openroad-irdropreport`, ensuring worst-case IR drop remains within strict PDK limits.
 
 ---

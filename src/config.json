@@ -72,7 +72,7 @@
     "u_core.u_mem.u_sram VPWR VGND VDD! VSS!",
     "u_core.u_mem.u_sram VPWR VGND VDDARRAY! VSS!"
   ],
-  "//4": "Sign-off: Magic DRC off, KLayout DRC on with the CMOS5L deck, overlap waiver (reference doc, 22 known overlaps).",
+  "//4": "Sign-off: Magic DRC off, KLayout DRC on with the CMOS5L deck, strict illegal-overlap check on (magic__illegal_overlap__count=0; walkthrough's 22 overlaps do not occur with our discrete Metal4 bridges).",
   "RUN_MAGIC_DRC": 0,
   "ERROR_ON_ILLEGAL_OVERLAPS": 1,
   "RUN_KLAYOUT_DRC": 1,
