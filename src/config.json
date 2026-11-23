@@ -74,7 +74,7 @@
   ],
   "//4": "Sign-off: Magic DRC off, KLayout DRC on with the CMOS5L deck, overlap waiver (reference doc, 22 known overlaps).",
   "RUN_MAGIC_DRC": 0,
-  "ERROR_ON_ILLEGAL_OVERLAPS": 0,
+  "ERROR_ON_ILLEGAL_OVERLAPS": 1,
   "RUN_KLAYOUT_DRC": 1,
   "KLAYOUT_DRC_RUNSET": "pdk_dir::libs.tech/klayout/tech/drc/ihp-sg13cmos5l.drc",
   "RUN_KLAYOUT_XOR": 0,
