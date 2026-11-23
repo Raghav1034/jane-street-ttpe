@@ -211,7 +211,7 @@ class Lockstep:
         self.eq("rx_count", S["rx_count"], len(t.rx))
         self.eq("rx_full", bool(S["rx_full"]), len(t.rx) == MAX_RX)
         self.eq("rx_empty", bool(S["rx_empty"]), len(t.rx) == 0)
-        self.eq("rx_overrun", S["rx_overrun"], min(t.rx_overrun, 255))
+        self.eq("rx_overrun", S["rx_overrun"], t.rx_overrun)
         if t.rx:
             self.eq("rx head byte", S["rx_rdata"], t.rx[0][1])
         pins = (S["oe"], S["out"], S["uo"])

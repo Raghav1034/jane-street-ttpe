@@ -228,7 +228,7 @@ class Ttpe:
         if n == "HPUSH":
             if len(self.rx) < self.rx_depth:
                 self.rx.append((k, self.sr))
-            else:
+            elif self.rx_overrun < 255:
                 self.rx_overrun += 1
             return True, None
 

@@ -71,7 +71,7 @@ class TraceRecorderDut:
             tx_count=txn, rx_count=len(t.rx),
             tx_full=int(txn == MAX_TX), tx_empty=int(txn == 0),
             rx_full=int(len(t.rx) == MAX_RX), rx_empty=int(len(t.rx) == 0),
-            rx_overrun=min(t.rx_overrun, 255),
+            rx_overrun=t.rx_overrun,
             rx_rdata=t.rx[0][1] if t.rx else 0,
             mem_free=int(t.halted),
         )

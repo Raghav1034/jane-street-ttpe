@@ -350,7 +350,7 @@ def scn_rx_overrun_saturates():
     """
     def check(ls):
         assert ls.halts and not ls.iss.illegal
-        assert ls.iss.rx_overrun == 512 - 8
+        assert ls.iss.rx_overrun == 255
         assert ls.last_state["rx_overrun"] == 255 and ls.last_state["rx_count"] == 8
     return Scenario("rx_overrun_saturates", pad512(asm_text(src)), W.BusWorld(),
                     DefaultPolicy(rx_drain=False), 5600, check)
