@@ -26,6 +26,7 @@ _SW_TESTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sw",
 if _SW_TESTS not in sys.path:
     sys.path.append(_SW_TESTS)
 from test_i2c_target import IndependentI2CMaster, SPEC_100K, SPEC_400K  # noqa: E402
+from test_spi_slave import IndependentSPIMaster  # noqa: E402
 
 EX_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sw", "examples")
 HALT_WORD = isa.encode(isa.OPCODES["HALT"])
@@ -706,6 +707,60 @@ def scn_i2c_target_400k():
                     master, DefaultPolicy(tx_timed=timed), 10500, check)
 
 
+def scn_spi_slave_mode0():
+    """spi_slave.asm (Mode 0: CPOL=0, CPHA=0, default 1.0 MHz H=25) driven by IndependentSPIMaster.
+    Three full-duplex frames (lengths 1, 4, 2); checks MISO setup/hold, Hi-Z <= 6 cyc after CS_N rise,
+    zero pin contention on CS_N/MOSI/SCK, exact RX/TX bytes, and 3 frame-end toggles on uo6."""
+    mosi = [[0xA5], [0x00, 0xFF, 0x81, 0x7E], [0x12, 0x34]]
+    miso = [[0x5A], [0xDE, 0xAD, 0xBE, 0xEF], [0xC3, 0x0F]]
+    host_tx = [1, 0x5A, 4, 0xDE, 0xAD, 0xBE, 0xEF, 2, 0xC3, 0x0F]
+    master = IndependentSPIMaster(
+        mosi, cpol=0, cpha=0, half_period=25,
+        t_lead=25, t_lag=25, t_cs_hi=40,
+        miso_setup_min=10, miso_hold_min=5,
+    )
+
+    def check(ls):
+        assert not ls.iss.illegal
+        assert master.done, "independent SPI master (Mode 0) did not finish within cycle budget"
+        assert master.violations == [], master.violations
+        assert master.rx_frames == miso, (master.rx_frames, miso)
+        assert ls.rx_got == [b for fr in mosi for b in fr], ls.rx_got
+        assert ls.last_state["rx_overrun"] == 0, ls.last_state["rx_overrun"]
+        assert usb_toggles(ls, 6) == 3, usb_toggles(ls, 6)
+        assert master.max_hiz_latency <= 6, master.max_hiz_latency
+
+    return Scenario("spi_slave_mode0", pad512(example("spi_slave.asm", CPOL=0, CPHA=0)),
+                    master, DefaultPolicy(tx_bytes=host_tx), 4000, check)
+
+
+def scn_spi_slave_mode3():
+    """spi_slave.asm (Mode 3: CPOL=1, CPHA=1, default 1.0 MHz H=25 + jitter) driven by
+    IndependentSPIMaster. Variable-length frames (4, 0-byte CS pulse, 2); checks MISO setup/hold,
+    polled Hi-Z <= 17 cyc after CS_N rise, exact RX/TX bytes, and 3 frame-end toggles on uo6."""
+    mosi = [[0x0F, 0xF0, 0xA5, 0x5A], [], [0xC3, 0x3C]]
+    miso = [[0x12, 0x34, 0x56, 0x78], [], [0x9A, 0xBC]]
+    host_tx = [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC]
+    master = IndependentSPIMaster(
+        mosi, cpol=1, cpha=1, half_period=25,
+        t_lead=25, t_lag=25, t_cs_hi=40,
+        jitter=2, seed=7, miso_setup_min=6, miso_hold_min=5,
+    )
+
+    def check(ls):
+        assert not ls.iss.illegal
+        assert master.done, "independent SPI master (Mode 3) did not finish within cycle budget"
+        assert master.violations == [], master.violations
+        assert master.rx_frames == miso, (master.rx_frames, miso)
+        assert ls.rx_got == [b for fr in mosi for b in fr], ls.rx_got
+        assert ls.last_state["rx_overrun"] == 0, ls.last_state["rx_overrun"]
+        assert usb_toggles(ls, 6) == 3, usb_toggles(ls, 6)
+        assert master.max_hiz_latency <= 17, master.max_hiz_latency
+
+    return Scenario("spi_slave_mode3", pad512(example("spi_slave.asm", CPOL=1, CPHA=1)),
+                    master, DefaultPolicy(tx_bytes=host_tx), 3600, check)
+
+
 # ------------------------------------------------------------------ random programs
 def random_program(rng, n_words=64):
     ops = ([0] * 3 + [1] * 8 + [2] * 6 + [3] * 3 + [4] * 4 + [5] * 4 + [6] * 8 + [7] * 6 +
@@ -1045,6 +1100,8 @@ def examples():
         scn_i2c_stretch(),
         scn_i2c_target_100k(),
         scn_i2c_target_400k(),
+        scn_spi_slave_mode0(),
+        scn_spi_slave_mode3(),
     ]
 
 
