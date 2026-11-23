@@ -113,6 +113,8 @@ def simulate(
 
 ## Worked Example Traces
 
+> Note: the worked example traces below were produced by the repository ISS.
+
 ### Example 1 — Basic Delta Timing and Pin Effective Cycle
 * **Program:**
   * `0x000`: `0x11010005` (`PINS high uio0 @5`)
