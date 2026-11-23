@@ -1,6 +1,6 @@
-; usb_rx.asm - low-speed USB (1.5 Mbit/s) packet receiver for the PROPOSED ttpe_usb_rx
-; bit-slicer primitive (docs/USB_LS_RX.md).  NOT runnable on the current RTL: it needs the
-; primitive and its four virtual source pins, which exist only in sw/usb_ls.py (reference model).
+; usb_rx.asm - low-speed USB (1.5 Mbit/s) packet receiver using the ttpe_usb_rx
+; bit-slicer primitive (src/ttpe_usb_rx.sv, docs/USB_LS_RX.md), enabled via MODE[0] = 1
+; and verified in RTL lockstep (TARGET=core) and functional gate-level simulation (gl_test).
 ;
 ; Virtual source pins (valid only while USBEN is set; they replace ui4..ui7):
 ;   ui4 TICK  1-cycle pulse per decoded data bit (NRZI decoded, stuffed bits removed) and one at packet end

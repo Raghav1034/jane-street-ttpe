@@ -46,9 +46,9 @@ All inputs are sampled at the edge that ends the cycle in which they are applied
 
 | What | Status |
 |---|---|
-| `test/test_ttpe_core.py` on the real RTL under Icarus + cocotb | 65/65 tests (62 scenarios + 3 harness tests) reported passing by the maintainer (local `test/results_core_pdk.xml` dated 2026-10-23, not re-run in this review). |
-| `sw/tests` | 152/152 tests pass (`python -I -m unittest discover -s sw/tests -f`, CI run `44706700512`, `df0cdcc`, incl. WP2(b) post-reset X/Z strictness tests); mutation harness `sw/mutants_fw.py`: 92 killed + 1 argued equivalent (`I14`) of 93. |
-| Synthesis, area, timing | Hardened at 6x4 in CI (author-reported `gds`, `precheck`, functional `gl_test` 16/16 on `dev/protocol-continuation`, not verified in this review); 8x4 re-hardening and baseline comparison pending (see `docs/PHASE_E_REPORT.md` 1.7). |
+| `test/test_ttpe_core.py` on the real RTL under Icarus + cocotb | 70/70 tests (66 scenarios + 4 harness tests, live `IsaContractMonitor` + negative control; PDK + stub, CI run on `b7143b9`, not re-run locally). |
+| `sw/tests` | 186/186 tests pass (`python -I -m unittest discover -s sw/tests -f`, incl. WP2(b) post-reset X/Z strictness, I2C target, SPI slave, and `IsaContractMonitor` N1–N10); mutation harness `sw/mutants_fw.py`: `126` killed + `1` argued equivalent (`I14`) of `127` (verified at `824c1be`). |
+| Synthesis, area, timing | Hardened and CI-verified at 8x4 (`gds` with `ERROR_ON_ILLEGAL_OVERLAPS=1` and `0` illegal overlaps, `0` KLayout DRC, LVS clear, `precheck` clear, functional `gl_test` 16/16 with `-DGL_TEST -DFUNCTIONAL`, zero-delay / not SDF-timed; CI run on `b7143b9`, not re-run locally; see `docs/PHASE_E_REPORT.md` §1.8). |
 
 `ttpe_exec.sv` no longer uses constant bit-selects inside `always_comb` (named wires instead), which
 removes the Icarus "constant selects in always_* processes" messages. The `test_ttpe_core.py` tests tie

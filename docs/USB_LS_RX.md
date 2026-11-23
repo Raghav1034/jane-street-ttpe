@@ -1,13 +1,11 @@
 # Low-speed USB receive on the TTPE: cycle budget and `ttpe_usb_rx` primitive (Phase D)
 
-Status: **RTL simulated (107/107 cocotb; 89/89 usb+core+top, maintainer-reported, not re-run in this review), synthesised, placed, routed and functional gate-level tested at 6x4 (raw CI log not verified in this review; 8x4 pending); not tested on real USB.**
-RTL simulation (Icarus + cocotb, maintainer-reported baseline, local `test/results_core_pdk.xml` dated 2026-10-23): `TARGET=usb` 8/8, `TARGET=core` 65/65 (62 scenarios + 3 harness tests, incl. 5 `usb_dev_*`),
-`TARGET=top` 16/16, `TARGET=mem` 18/18. Physical flow: GitHub Actions on `dev/protocol-continuation` (commit `ba2e07b`, 6x4 tile), as reported by the project author (raw CI log not verified in this review): `gds` (LibreLane 3.1.0.dev3, ihp-sg13cmos5l), `precheck` (DRC/LVS/antenna/manifest), `gl_test` (functional `-DFUNCTIONAL` gate-level run of all 16 `test_ttpe_top` tests on the post-P&R netlist, not SDF-timed, including `t_usb_rx_e2e`, `t_usb_mode_register`, `t_usb_disabled_passthrough`) and `viewer` all passed. The authoring session saw the CI summary,
-not the raw logs; the cell count, area, WNS/TNS and congestion numbers have not been compared against baseline
-`d8bffd4` yet (see `PHASE_E_REPORT.md` 1.5). `gl_test` runs only the top-level tests, on one set of vectors: it is
+Status: **RTL simulated (112/112 PDK cocotb + 104/104 stub cocotb; CI run on `b7143b9`, not re-run locally), synthesised, placed, routed and functional gate-level tested at 8x4 (`b7143b9`); not tested on real USB.**
+RTL simulation (Icarus + cocotb, CI run on `b7143b9`, not re-run locally): `TARGET=usb` 8/8, `TARGET=core` 70/70 (66 scenarios + 4 harness tests, incl. 5 `usb_dev_*` and live `IsaContractMonitor`),
+`TARGET=top` 16/16, `TARGET=mem` 18/18 (112/112 PDK-SRAM; 104/104 stub-SRAM). Physical flow: CI-verified at 8x4 (`b7143b9`, identical metrics to `59d914b` and `2274c73`): `gds` (LibreLane, ihp-sg13cmos5l, `ERROR_ON_ILLEGAL_OVERLAPS=1` with `0` illegal overlaps, `0` KLayout DRC, LVS clear), `precheck`, and functional `gl_test` (`-DGL_TEST -DFUNCTIONAL`, zero-delay / not SDF-timed, 16/16 `test_ttpe_top` tests on the post-P&R netlist, including `t_usb_rx_e2e`, `t_usb_mode_register`, `t_usb_disabled_passthrough`) all passed (see `docs/PHASE_E_REPORT.md` §1.8). `gl_test` runs only the top-level tests, on one set of vectors: it is
 evidence that synthesis kept the tested behaviour, not a formal equivalence proof.
 Everything called "measured" below was produced by the Python reference model (`sw/usb_ls.py`) running against the
-cycle-accurate ISS (`sw/ttpe_iss.py`): `python3 -I -m unittest discover -s sw/tests -f` (152/152 tests, CI run `44706700512`). The USB signalling
+cycle-accurate ISS (`sw/ttpe_iss.py`): `python3 -I -m unittest discover -s sw/tests -f` (186/186 tests, CI run on `b7143b9`). The USB signalling
 conventions come from the author's memory of the specification and no real USB capture has been replayed.
 ISA v0.2 is unchanged; with MODE.usb_en = 0 (reset value) the design behaves as before.
 
@@ -263,6 +261,5 @@ NAK, anything else with nothing. The response reuses the `usb_tx.asm` bit loop w
   engine can meet a turnaround window on its own; it is not a USB function.
 * **Verification:** 10 ISS tests in `sw/tests/test_usb_device_ack.py`; negative controls (padding moved out of the
   window, the ERR check removed, the partial-byte check removed, the J wait removed) each make tests fail. All five
-  lockstep scenarios `usb_dev_*` in `test/ttpe_scenarios.py` are included in the 65/65 `TARGET=core` run (62 scenarios +
-  3 harness tests) reported by the maintainer (local `test/results_core_pdk.xml` dated 2026-10-23, not re-run in this
-  review).
+  lockstep scenarios `usb_dev_*` in `test/ttpe_scenarios.py` are included in the 70/70 `TARGET=core` run (66 scenarios +
+  4 harness tests, PDK + stub, CI run on `b7143b9`, not re-run locally).

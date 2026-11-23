@@ -304,11 +304,11 @@ Level 5| Functional Gate-Level Netlist Sim (Icarus + PDK UDPs)     |
        +-----------------------------------------------------------+
 Level 4| Chip-Level Pin Tests (test_ttpe_top.py, 16 tests)         |
        +-----------------------------------------------------------+
-Level 3| Core Lockstep Co-Sim (65: 62 scenarios + 3 harness)       |
+Level 3| Core Lockstep Co-Sim (70: 66 scenarios + 4 harness)       |
        +-----------------------------------------------------------+
 Level 2| SRAM Controller & Memory Tests (test_ttpe_mem.py, 18)     |
        +-----------------------------------------------------------+
-Level 1| Instruction Set Simulator & Unit Tests (152 tests)        |
+Level 1| Instruction Set Simulator & Unit Tests (186 tests)        |
        +-----------------------------------------------------------+
 ```
 
@@ -316,22 +316,22 @@ Level 1| Instruction Set Simulator & Unit Tests (152 tests)        |
 
 1. **Software Reference Model (`sw/ttpe_iss.py`):**
    - Pure Python cycle-exact instruction set simulator.
-   - 152 unit tests in `sw/tests/` (`python -I -m unittest discover -s sw/tests -f`, including the USB model exact-timing tests, USB TX loopback, I2C repeated START, host driver, and WP2(b) post-reset X/Z strictness tests) verifying opcode behavior, register transfers, timing deltas, and edge-detect timing.
+   - 186 unit, protocol, and ISA-contract-monitor tests in `sw/tests/` (`python -I -m unittest discover -s sw/tests -f`, including the USB model exact-timing tests, USB TX loopback, I2C master/target repeated START, SPI slave Modes 0–3, `IsaContractMonitor` N1–N10 negative controls, host driver, and WP2(b) post-reset X/Z strictness tests) verifying opcode behavior, register transfers, timing deltas, and edge-detect timing.
 2. **SRAM Subsystem Verification (`test/test_ttpe_mem.py`):**
    - 18 cocotb testcases validating memory arbitration, host read/write latency, pipeline hold, flush, and wrap.
 3. **Core Lockstep Co-Simulation (`test/test_ttpe_core.py`):**
-   - 65/65 cocotb tests (62 scenarios + 3 harness tests: 16 directed + 17 protocol examples + 14 USB including 5 `usb_dev_*` autonomous ACK/NAK + 3 USB transmit + 12 fuzz), CI-verified on run `44706700512` (`df0cdcc`, both `USE_PDK_SRAM=1` and `USE_PDK_SRAM=0`).
+   - 70/70 cocotb tests (66 scenarios + 4 harness tests: 16 directed + 21 protocol examples [incl. I2C target 100k/400k and SPI slave Mode 0/3] + 14 USB including 5 `usb_dev_*` autonomous ACK/NAK + 3 USB transmit + 12 fuzz, plus `test_isa_monitor_negative_control` and live `IsaContractMonitor` checking every core scenario with 0 violations), CI run on `b7143b9` (not re-run locally; both `USE_PDK_SRAM=1` and `USE_PDK_SRAM=0`).
    - Compares the SystemVerilog RTL cycle-by-cycle against `ttpe_iss.py` in lockstep.
-   - Earlier pre-USB mutation check (28 mutants against a Python transcription, not committed in this repo); firmware/model mutation harness `sw/mutants_fw.py` (`python -I sw/mutants_fw.py`: 92 killed + 1 argued equivalent [`I14`] of 93) is included in the repo.
+   - Earlier pre-USB mutation check (28 mutants against a Python transcription, not committed in this repo); firmware/model mutation harness `sw/mutants_fw.py` (`126` killed + `1` argued equivalent [`I14`] of `127`, verified at `824c1be`) is included in the repo.
 4. **Chip Top Pin Verification (`test/test_ttpe_top.py`):**
    - 16 comprehensive end-to-end tests (including USB MODE register, USB receive and disabled-passthrough) driving the design strictly through its top-level pins (`ui_in`, `uo_out`, `uio`), with WP2(b) strict post-reset X/Z checking active on all 24 output pins (`uo_out[7:0]`, `uio_out[7:0]`, `uio_oe[7:0]`; no masking, SRAM words read by tests explicitly initialized).
    - Verifies SPI slave framing, register read/write, memory loading, FIFO streaming, and protocol execution.
 5. **Gate-Level Simulation (`gl_test`) & 8×4 Physical Signoff:**
    - Runs **functional** gate-level simulation (`-DGL_TEST -DFUNCTIONAL`, zero-delay / not SDF-timed; provides no timing evidence) on the post-place-and-route netlist (`test/gate_level_netlist.v`) with PDK standard-cell UDPs and behavioural SRAM models.
-   - CI-verified at 8×4 on `@ihp-cmos5l` (`06f8069`, run `44489932940`, 50 MHz) and `@ttihp27a` (`c261c89`, run `44503186943`, 50 MHz; faster flow, slightly larger area, one sample each): `gds`, `precheck` (0 DRC, 0 pin-label, 0 zero-area), LVS, `gl_test` (16/16 functional, not SDF-timed; also 16/16 with WP2(b) strict post-reset X/Z checking on run `44706700541`, `df0cdcc`) and `viewer` all passed. **STA closes at 60 MHz (`16.667 ns`, one sample each; run `44572301237` on `49404b4`), functional verification at 50 MHz:** slow-corner setup worst slack `+8.6630 ns` (implied critical path `8.004 ns` by inference from `16.667 - 8.663`), fast-corner hold worst slack `+0.0898 ns`, 0 setup/hold violations; Tiny Tapeout pad round trip (~10 ns, unmeasured estimate per FAQ) is not modeled by `base.sdc`. Open warnings: Max Cap `30` (all corners), Max Slew `9`/`10`/`18` (`fast`/`typ`/`slow`), Max Fanout `44` (all corners) at 60 MHz (50 MHz stdout showed `30` cap and `9` fast slew; other slew/fanout counts truncated).
+   - CI-verified at 8×4 on `b7143b9` (not re-run locally; deterministic identical metrics to `59d914b` and `2274c73`, plus earlier 50 MHz baselines on `@ihp-cmos5l` `06f8069` and `@ttihp27a` `c261c89`): `gds` (`ERROR_ON_ILLEGAL_OVERLAPS=1`, `0` Magic illegal overlaps, `0` KLayout DRC), `precheck` (0 DRC, 0 pin-label, 0 zero-area), LVS, and `gl_test` (16/16 functional, not SDF-timed) all passed. **STA closes at 60 MHz (`16.667 ns`, functional verification at 50 MHz):** slow-corner setup worst slack `+8.6630 ns` (implied critical path `8.004 ns` by inference from `16.667 - 8.663`), fast-corner hold worst slack `+0.0898 ns`, 0 setup/hold violations; Tiny Tapeout pad round trip (~10 ns, unmeasured estimate per FAQ) is not modeled by `base.sdc`. The physical flow is deterministic for identical inputs; any deltas between configs come from the config change and are small (slow setup WS still >= `+8.3 ns`). Open warnings: Max Cap `30` (all corners), Max Slew `9`/`10`/`18` (`fast`/`typ`/`slow`), Max Fanout `44` (all corners) at 60 MHz (50 MHz stdout showed `30` cap and `9` fast slew; other slew/fanout counts truncated).
 6. **Low-speed USB receiver (`test/test_ttpe_usb.py`):**
    - 8 cocotb tests compare `ttpe_usb_rx` against the Python model `sw/usb_ls.py` on every clock (rate error, jitter, D-/D+ skew, bit stuffing, errors, enable/reset, ~82k-cycle fuzz). Run: `make -C test TARGET=usb`.
-   - CI-verified RTL + Python suite (run `44706700512`, `df0cdcc`): 18 (`mem`) + 65 (`core`: 62 scenarios + 3 harness tests) + 16 (`top`) + 8 (`usb`) = 107 PDK-SRAM cocotb tests (+ 99 stub-SRAM cocotb tests) + 152 Python unit tests = 259 primary tests (0 failures).
+   - CI-verified RTL + Python suite (CI run on `b7143b9`, not re-run locally): 18 (`mem`) + 70 (`core`: 66 scenarios + 4 harness tests) + 16 (`top`) + 8 (`usb`) = 112 PDK-SRAM cocotb tests (+ 104 stub-SRAM cocotb tests) + 186 Python unit tests = 298 primary tests (0 failures).
 
 ### Cocotb 2.1 & Gate-Level Netlist CI Fix
 During CI runs with `cocotb >= 2.1.0`, passing test runs generate XML attributes formatted as:
@@ -387,22 +387,30 @@ All example protocols have been verified cycle-for-cycle against physical specif
 3. **`spi_master.asm`:**
    - Supports all 4 SPI Modes (CPOL $\in \{0, 1\}$, CPHA $\in \{0, 1\}$).
    - Generates SCK clock frequencies up to **2.78 MHz** with zero cycle jitter.
-4. **`i2c_master.asm`:**
+4. **`spi_slave.asm`:**
+   - Full-duplex SPI target (38 words, zero RTL changes) across all 4 SPI modes (`1.0 MHz` default `H=25`; zero-pad-delay ceilings `2.083 MHz` CPHA=0 / `1.250 MHz` CPHA=1).
+   - Verified in Python across all 4 modes (`sw/tests/test_spi_slave.py`, `Q1..Q16` mutants) and in RTL lockstep for Mode 0 and Mode 3 (PDK + stub, CI run on `b7143b9`).
+   - **Limits:** TX FIFO must be preloaded before `CS_N` falls; CPHA=0 uses length-prefixed TX FIFO `[n, d0..d(n-1)]` while CPHA=1 is variable-length framed by `CS_N`.
+5. **`i2c_master.asm`:**
    - Verified for both Standard Mode (100 kHz) and Fast Mode (400 kHz).
    - Full support for I2C clock stretching by slave devices, ACK/NACK verification, and automatic STOP generation on error.
    - **Repeated START:** set `n[7] = 1` in the count byte to end a transaction without STOP (SCL held low, SDA released); the next command then begins with a repeated START (tSU;STA = tHD;STA = exactly `TH`, SCL low >= `TL`, SDA released before SCL rises, open-drain only). Register read: host bytes `A0 81 REG A1 n` gives `S A+W REG Sr A+R data.. P`. `n[6:0]` is the count (0 = 256); counts 128..255 are no longer expressible. 114 words.
-5. **`usb_rx.asm` + `ttpe_usb_rx.sv` (low-speed USB receive, hybrid):**
+6. **`i2c_target.asm`:**
+   - Open-drain I2C target (76 words, zero RTL changes) for 100 kHz default (`TSU_DAT=65`) and 400 kHz (`-D TSU_DAT=22`), with clock stretching on reads, address match/NACK, and repeated START (`Sr`).
+   - Verified with a settled-wire checker (`sw/tests/test_i2c_target.py`, `S1..S18` mutants), two-ISS cross-tests against `i2c_master.asm`, and 100 kHz / 400 kHz RTL lockstep.
+   - **Limits:** no 50 ns Fast-mode input spike filter, no 10-bit addressing, 8-deep RX FIFO requires timely host drain; 400 kHz is model-feasible in cycle arithmetic and not proven on a real bus.
+7. **`usb_rx.asm` + `ttpe_usb_rx.sv` (low-speed USB receive, hybrid):**
    - A 30-flop hardware bit slicer (`src/ttpe_usb_rx.sv`) recovers 1.5 Mb/s bit timing (33/33/34-cycle cells at 50 MHz), NRZI-decodes, removes bit stuffing and detects SYNC, EOP and stuff errors. It is enabled by `MODE[0]` (register `0x0B`) and drives the virtual pins `ui_in[4]` TICK, `ui_in[5]` DATA, `ui_in[6]` STOP, `ui_in[7]` ERR (source pins 12..15). D+ = `uio[6]`, D- = `uio[7]`.
    - An 18-word program (`sw/examples/usb_rx.asm`) pushes each received byte to the RX FIFO and toggles `uo_out[6]` at every packet end (and `uo_out[5]` for a bad packet). ISA v0.2 is unchanged; with `MODE[0]` = 0 the design behaves as before.
    - **Scope and limits:** receive only (no transmit, no CRC/PID check in hardware), 8-byte RX FIFO that the host must drain, electrical USB levels and pull-ups are external and unverified. Verified in RTL and gate-level simulation against synthetic waveforms; not run against real USB. Details: `docs/USB_LS_RX.md`, `docs/PHASE_E_REPORT.md`.
-6. **`usb_tx.asm` (low-speed USB transmit, software only):**
+8. **`usb_tx.asm` (low-speed USB transmit, software only):**
    - Host pushes `n` then `n` bytes (PID + payload + CRC, already formed); the program sends SYNC, NRZI/bit-stuffed data LSB first on D+ = `uio[6]`, D- = `uio[7]` (push-pull, released afterwards), then SE0 for 2 bit times and J for 1. Cells are 33/34 cycles (266 cycles per byte vs 266.67 ideal = +0.25% fast relative to 1.5 Mb/s). 72 words, no RTL change.
    - The waveform is checked cycle for cycle against `sw/usb_ls.py` and looped back through the `ttpe_usb_rx` model and `usb_rx.asm` for ACK, NAK, SETUP, DATA0 and an all-0xFF DATA1.
    - **Limits:** CRC must come from the host (three registers cannot hold a CRC16); the TX FIFO must stay ahead of the wire (a late byte stretches the line); no turnaround or response logic; electrical levels, pull-ups and series resistors are external and unverified; checked in simulation only.
-7. **`usb_device_ack.asm` (autonomous USB handshake, software only):**
+9. **`usb_device_ack.asm` (autonomous USB handshake, software only):**
    - Receive with the `ttpe_usb_rx` slicer (`MODE[0]` = 1), push every byte to the RX FIFO, wait for the host's SE0 to end (`WAIT high uio7`), then answer DATA0/DATA1 with ACK and IN with NAK on the engine itself; anything else, and any packet with a stuff violation or a partial last byte (flagged on `uo[5]`), gets no response. 123 words, no RTL change.
    - Measured on the ISS with a closed-loop bus (the chip reads back its own transmission): the first K edge of the response is exactly 140 cycles (4.2 bit times) after the end of the host SE0 on every path, for host SE0 widths of 62..75 cycles and +-1.5% host rate. The turnaround window used for the assertion, 2 to 6.5 bit times (67..216 cycles), was relayed to us and has not been checked against the specification text; 140 also fits when measured from the end of the J bit that follows the SE0 (107 cycles).
-   - **Limits:** a turnaround demonstrator, not a compliant device: no CRC5/CRC16 check, no address/endpoint match, no data-toggle tracking, always NAK on IN. Only a bit-stuff violation or a partial byte stops the ACK. Its five `usb_dev_*` scenarios are included in the 65/65 core run (62 scenarios + 3 harness tests) CI-verified on run `44706700512` (`df0cdcc`).
+   - **Limits:** a turnaround demonstrator, not a compliant device: no CRC5/CRC16 check, no address/endpoint match, no data-toggle tracking, always NAK on IN. Only a bit-stuff violation or a partial byte stops the ACK. Its five `usb_dev_*` scenarios are included in the 70/70 core run (66 scenarios + 4 harness tests, CI run on `b7143b9`, not re-run locally).
 
 ---
 
@@ -438,15 +446,16 @@ jane-street-ttpe/
 │   ├── ttpe_usb_rx.sv      # Low-speed USB receive bit slicer (NRZI, unstuff, SYNC/EOP), behind MODE[0]
 │   └── ttpe_sram_ctrl.sv   # Deterministic 3-stage SRAM memory arbiter
 ├── sw/
-│   ├── examples/           # Assembly programs: uart_tx, uart_rx, spi_master, i2c_master, usb_rx, usb_tx, usb_device_ack
-│   ├── tests/              # 152 Python ISA, ISS, USB, I2C, host-driver, and X/Z unit tests
+│   ├── examples/           # Assembly programs: uart_tx, uart_rx, spi_master, spi_slave, i2c_master, i2c_target, usb_rx, usb_tx, usb_device_ack
+│   ├── tests/              # 186 Python ISA, ISS, USB, I2C, SPI, monitor, host-driver, and X/Z unit tests
 │   ├── ttpe_asm.py         # Complete macro assembler
 │   ├── ttpe_isa.py         # Canonical source of truth for instruction encodings
 │   ├── ttpe_iss.py         # Cycle-exact Instruction Set Simulator (ISS)
 │   └── ttpe_world.py       # Simulation environment connecting ISS to virtual peripherals
 ├── test/
 │   ├── ihp_sram/           # IHP PDK behavioral SRAM simulation models
-│   ├── Makefile            # Cocotb build system (mem, core, top, gl targets)
+│   ├── isa_contract_mon.py # Live ISA contract monitor checked on every lockstep scenario
+│   ├── Makefile            # Cocotb build system (mem, core, top, usb, gl targets)
 │   ├── requirements.txt    # Pinned Python verification dependencies (cocotb)
 │   ├── tb.v                # Top-level Verilog testbench for gate-level netlist runs
 │   ├── test_ttpe_core.py   # Lockstep RTL vs ISS co-simulation testbench
@@ -468,9 +477,9 @@ Run the standalone ISA and ISS unit tests:
 python3 -m unittest discover -s sw/tests -v
 ```
 
-Assemble all seven example programs into `sw/build/` (`.hex` for `$readmemh`, `.bin`, and `.py` = `PROGRAM = [...]` for the host):
+Assemble all nine example programs into `sw/build/` (`.hex` for `$readmemh`, `.bin`, and `.py` = `PROGRAM = [...]` for the host):
 ```bash
-make -C sw images                       # uart_tx uart_rx spi_master i2c_master usb_rx usb_tx usb_device_ack
+make -C sw images                       # uart_tx uart_rx spi_master spi_slave i2c_master i2c_target usb_rx usb_tx usb_device_ack
 make -C sw images ASMFLAGS="-D BIT=100" # extra assembler options (-D NAME=VALUE) for every program
 ```
 
@@ -596,12 +605,12 @@ During the USB phase, the AI environment did not have access to an HDL simulator
 
 **Method.**
 1. *Model first.* `ttpe_isa.py` / `ttpe_iss.py` define a cycle-exact golden model (`commit = accept + 1 + delta`, 3-cycle branch penalty, 2-flop input synchroniser). Protocol programs are written and timing-checked on the model before any RTL depends on them.
-2. *Lockstep RTL co-simulation.* The Execution Unit RTL is compared with the model every cycle in cocotb (`make -C test TARGET=core`: 65 tests = 62 scenarios + 3 harness tests, including directed ISA, FIFO and host-interface cases, protocol examples, USB receive/transmit/autonomous ACK, I2C repeated START and random fuzz). Chip-pin tests (`TARGET=top`, 16) drive only `ui_in`/`uio` and check `uo_out`/`uio`.
-3. *Fault injection.* An earlier pre-USB mutation check (28 mutants in a Python transcription, not committed in this repo) predates the USB block; the firmware/model mutation harness `sw/mutants_fw.py` (`python -I sw/mutants_fw.py`: 92 killed + 1 argued equivalent [`I14`] of 93) is included in the repository.
+2. *Lockstep RTL co-simulation.* The Execution Unit RTL is compared with the model every cycle in cocotb (`make -C test TARGET=core`: 70 tests = 66 scenarios + 4 harness tests, including live `IsaContractMonitor` checking with 0 violations, `test_isa_monitor_negative_control`, directed ISA, FIFO and host-interface cases, protocol examples incl. I2C target and SPI slave Mode 0/3, USB receive/transmit/autonomous ACK, I2C repeated START and random fuzz). Chip-pin tests (`TARGET=top`, 16) drive only `ui_in`/`uio` and check `uo_out`/`uio`.
+3. *Fault injection.* An earlier pre-USB mutation check (28 mutants in a Python transcription, not committed in this repo) predates the USB block; the firmware/model mutation harness `sw/mutants_fw.py` (`126` killed + `1` argued equivalent [`I14`] of `127`, verified at `824c1be`) is included in the repository.
 4. *Primitive against its specification.* The USB bit slicer `ttpe_usb_rx` is compared per cycle with its Python model (`TARGET=usb`, about 82k fuzz cycles), plus an independent decode of its outputs back to packet bits; the transmit program is checked cycle for cycle against `usb_ls.tx_expected` and looped back through the receive model and `usb_rx.asm`.
-5. *Gate level and physical.* The same top-level tests run as a **functional** (`-DGL_TEST -DFUNCTIONAL`, zero-delay / not SDF-timed) gate-level simulation on the post-P&R netlist in CI (`gl_test`), with the LibreLane flow, KLayout DRC, LVS and the Tiny Tapeout precheck, CI-verified at 8×4 on `@ihp-cmos5l` (`06f8069`, run `44489932940`) and `@ttihp27a` (`c261c89`, run `44503186943`). Power-grid alignment of the IHP SRAM macro is described in section 8.
+5. *Gate level and physical.* The same top-level tests run as a **functional** (`-DGL_TEST -DFUNCTIONAL`, zero-delay / not SDF-timed) gate-level simulation on the post-P&R netlist in CI (`gl_test`), with the LibreLane flow (`ERROR_ON_ILLEGAL_OVERLAPS=1`, `0` illegal overlaps), KLayout DRC (`0` errors), LVS and the Tiny Tapeout precheck, CI-verified at 8×4 on `b7143b9` (deterministic identical metrics to `59d914b` and `2274c73`; earlier 50 MHz baselines on `@ihp-cmos5l` `06f8069` and `@ttihp27a` `c261c89`). Power-grid alignment of the IHP SRAM macro is described in section 8.
 
-**Evidence and its limits.** Python suite: 152/152 tests (`python -I -m unittest discover -s sw/tests -f`), including independent USB vectors (SETUP, DATA0, ACK as literal line levels), exact-timing slicer golden tests, closed-loop USB handshake tests, and WP2(b) post-reset X/Z strictness unit tests; mutation harness `sw/mutants_fw.py` (`python -I sw/mutants_fw.py`: 92 killed + 1 argued equivalent [`I14`] of 93, 0 STALE, 0 INVALID). RTL (CI-verified on run `44706700512`, `df0cdcc`): 107/107 PDK-SRAM cocotb tests (18 `mem` + 8 `usb` + 65 `core` [62 scenarios + 3 harness tests, including 5 `usb_dev_*`] + 16 `top` with WP2(b) strict post-reset X/Z checking on all 24 output pins and explicit SRAM test initialization, no masking; 259 primary tests combined with Python, plus 99/99 stub-SRAM cocotb tests). GDS, precheck, functional `gl_test` (`-DGL_TEST -DFUNCTIONAL`, zero-delay / not SDF-timed — no timing evidence, 16/16 including WP2(b) strict X/Z on run `44706700541`) and viewer jobs CI-verified passing at 8×4 on `@ihp-cmos5l` (`06f8069`, run `44489932940`, 50 MHz) and `@ttihp27a` (`c261c89`, run `44503186943`, 50 MHz; faster flow, slightly larger area, one sample each). STA closes at 60 MHz (`16.667 ns`, one sample each; run `44572301237` on `49404b4`: slow-corner setup WS `+8.6630 ns` [implied critical path `8.004 ns` by inference from `16.667 - 8.663`], fast-corner hold WS `+0.0898 ns`, 0 setup/hold violations), while functional verification remains at 50 MHz; Tiny Tapeout pad round trip (~10 ns, unmeasured estimate per FAQ) is not modeled by `base.sdc`. Open warnings: Max Cap `30` (all corners), Max Slew `9`/`10`/`18` (`fast`/`typ`/`slow`), Max Fanout `44` (all corners) at 60 MHz (50 MHz stdout showed `30` cap and `9` fast slew; other slew/fanout counts truncated), with 869 (`@ihp-cmos5l`) / 714 (`@ttihp27a`) inserted hold buffers. Not covered, and listed with severity in `docs/PHASE_E_REPORT.md`: models, RTL and tests share one author, so a shared misreading would pass every test; the USB conventions were cross-checked in part against public sources (J/K polarity, six-ones stuffing, +-1.5% rate, 1.25-1.50 us EOP, D- pull-up; table in `docs/USB_LS_RX.md` section 7) but the turnaround window and receiver acceptance widths were not, and nothing was checked against a real host or captured trace; pad electricals, pull-ups and USB thresholds are unverified; nothing has run on silicon.
+**Evidence and its limits.** Python suite: 186/186 tests (`python -I -m unittest discover -s sw/tests -f`), including independent USB vectors (SETUP, DATA0, ACK as literal line levels), exact-timing slicer golden tests, closed-loop USB handshake tests, I2C target and SPI slave tests, `IsaContractMonitor` N1–N10 negative controls, and WP2(b) post-reset X/Z strictness unit tests; mutation harness `sw/mutants_fw.py` (`126` killed + `1` argued equivalent [`I14`] of `127`, 0 STALE, 0 INVALID, verified at `824c1be`). RTL (CI run on `b7143b9`, not re-run locally): 112/112 PDK-SRAM cocotb tests (18 `mem` + 8 `usb` + 70 `core` [66 scenarios + 4 harness tests, including live `IsaContractMonitor`, 5 `usb_dev_*`, I2C target, and SPI slave Mode 0/3] + 16 `top` with WP2(b) strict post-reset X/Z checking on all 24 output pins and explicit SRAM test initialization, no masking; 298 primary tests combined with Python, plus 104/104 stub-SRAM cocotb tests). GDS (`ERROR_ON_ILLEGAL_OVERLAPS=1`, `0` illegal overlaps, `0` KLayout DRC, LVS clear), precheck, and functional `gl_test` (`-DGL_TEST -DFUNCTIONAL`, zero-delay / not SDF-timed — no timing evidence, 16/16) CI-verified passing at 8×4 on `b7143b9` (deterministic identical metrics to `59d914b` and `2274c73`; flow is deterministic for identical inputs; any deltas between configs come from the config change and are small, slow setup WS still >= `+8.3 ns`). STA closes at 60 MHz (`16.667 ns`, slow-corner setup WS `+8.6630 ns` [implied critical path `8.004 ns` by inference from `16.667 - 8.663`], fast-corner hold WS `+0.0898 ns`, 0 setup/hold violations), while functional verification remains at 50 MHz; Tiny Tapeout pad round trip (~10 ns, unmeasured estimate per FAQ) is not modeled by `base.sdc`. Open warnings: Max Cap `30` (all corners), Max Slew `9`/`10`/`18` (`fast`/`typ`/`slow`), Max Fanout `44` (all corners) at 60 MHz (50 MHz stdout showed `30` cap and `9` fast slew; other slew/fanout counts truncated), with 869 (`@ihp-cmos5l`) / 714 (`@ttihp27a`) inserted hold buffers. Not covered, and listed with severity in `docs/PHASE_E_REPORT.md`: models, RTL and tests share one author, so a shared misreading would pass every test; the USB conventions were cross-checked in part against public sources (J/K polarity, six-ones stuffing, +-1.5% rate, 1.25-1.50 us EOP, D- pull-up; table in `docs/USB_LS_RX.md` section 7) but the turnaround window and receiver acceptance widths were not, and nothing was checked against a real host or captured trace; pad electricals, pull-ups and USB thresholds are unverified; nothing has run on silicon.
 
 Reproduce: `python3 -I -m unittest discover -s sw/tests -v`, `make -C test regress` (needs Icarus Verilog and cocotb), `make -C sw images`.
 

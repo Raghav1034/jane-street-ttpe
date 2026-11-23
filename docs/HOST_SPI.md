@@ -231,9 +231,9 @@ open("prog.bin", "wb").write(struct.pack("<%dI" % len(words), *words))
 
 | What | Status |
 |---|---|
-| `test/test_ttpe_top.py` (16 chip-level tests, pins only) on the real RTL under Icarus + cocotb | 16/16 reported passing by the maintainer (`make -C test TARGET=top`, not re-run in this review). |
-| Core lockstep (`test/test_ttpe_core.py`) | 65/65 (62 scenarios + 3 harness tests) reported passing by the maintainer (local `test/results_core_pdk.xml` dated 2026-10-23, not re-run in this review). |
-| Synthesis, area, timing, gate-level simulation | Hardened at 6x4 in CI (author-reported `gds`, `precheck`, functional `gl_test` 16/16 with `-DFUNCTIONAL`, not SDF-timed, on `dev/protocol-continuation`; not verified in this review); 8x4 re-hardening pending (see `docs/PHASE_E_REPORT.md` 1.7). |
+| `test/test_ttpe_top.py` (16 chip-level tests, pins only) on the real RTL under Icarus + cocotb | 16/16 passing (`make -C test TARGET=top`, PDK + stub, CI run on `b7143b9`, not re-run locally). |
+| Core lockstep (`test/test_ttpe_core.py`) | 70/70 (66 scenarios + 4 harness tests, with live `IsaContractMonitor` and negative control; PDK + stub, CI run on `b7143b9`, not re-run locally). |
+| Synthesis, area, timing, gate-level simulation | Hardened and CI-verified at 8x4 (`gds` with `ERROR_ON_ILLEGAL_OVERLAPS=1` and `0` illegal overlaps, `0` KLayout DRC, LVS clear, `precheck` clear, functional `gl_test` 16/16 with `-DGL_TEST -DFUNCTIONAL`, zero-delay / not SDF-timed, CI run on `b7143b9`, not re-run locally; see `docs/PHASE_E_REPORT.md` §1.8). |
 
 ## Not covered / assumptions to confirm
 

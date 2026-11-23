@@ -5,7 +5,7 @@ reference model (`sw/ttpe_iss.py`). Source of truth for all encodings: `sw/ttpe_
 The SystemVerilog package `src/ttpe_isa_pkg.sv` is generated from it
 (`python3 sw/ttpe_isa.py --gen-sv > src/ttpe_isa_pkg.sv`); `sw/tests/test_isa_asm.py` checks it.
 
-Every timing statement below is checked cycle-exactly by `sw/tests` (152 tests, `python -I -m unittest discover -s sw/tests -f`). Cycle numbers are
+Every timing statement below is checked cycle-exactly by `sw/tests` (186 tests, `python -I -m unittest discover -s sw/tests -f`). Cycle numbers are
 integers; one cycle is 20 ns at 50 MHz.
 
 ## 1. Architectural state
@@ -49,7 +49,7 @@ Pin numbering: **sources** 0-7 = `uio_in[0..7]`, 8-15 = `ui_in[0..7]`; **sinks**
 | 7 | `SAMPLE` | source pin (0-15) | [0] msb-first (`P[7:1]` ignored) | msb-first: `SR <- {SR[6:0], pin}`. lsb-first: `SR <- {pin, SR[7:1]}`. |
 | 8 | `REG` | sub-op (below) | immediate | Register operations. |
 | 9 | `DJNZ` | [0] counter (0=`C0`, 1=`C1`; `A[3:1]` ignored) | target[7:0] | `C <- (C - 1) & 0xFF`; jump to `{branch_pc[8], P}` if the new value is non-zero. Same branch-page rule. `LDI C,0` therefore loops 256 times. |
-| A | `HPUSH` | - (ignored) | - (ignored) | Push `SR` to the 8-deep host RX FIFO. Never blocks. Evaluated against start-of-cycle `rx_full`: if `rx_full = 1`, the byte is dropped and `rx_overrun` increments (saturating at `255`) **even if the host asserts `rx_pop = 1` in the same cycle**. `rx_fifo_flush` overrides `HPUSH` and clears the FIFO and `rx_overrun` at the cycle edge. |
+| A | `HPUSH` | - (ignored) | - (ignored) | Push `SR` to the 8-deep host RX FIFO. Never blocks. Evaluated against start-of-cycle `rx_full`: if `rx_full = 1`, the byte is dropped and `rx_overrun` increments (saturating at `255`) **even if the host asserts `rx_pop = 1` in the same cycle**. `rx_fifo_flush` overrides `HPUSH` and `rx_pop`, clearing the FIFO and `rx_overrun` at the cycle edge (RTL: `src/ttpe_fifo.sv:L61,L73-L79`, wired at `src/ttpe_core.sv:L191-L204`). |
 | B | `HPULL` | - (ignored) | - (ignored) | Blocks until start-of-cycle `tx_empty = 0`, then `SR <- tx_rdata` and pops the TX FIFO. A host `tx_push` in cycle `X` is first visible to `HPULL` in cycle `X + 1`. If `tx_fifo_flush` occurs in the same cycle an `HPULL` commits, `HPULL` still reads the pre-flush head byte and the FIFO is empty next cycle. |
 | C | `HALT` | - (ignored) | - (ignored) | Stop the core (`halted <- 1`). Host can resume; unless overridden by `host_pc_load`, execution continues at `(halt_pc + 1) & 0x1FF`. |
 | D | `JSB` | [3] polarity `v`, [2:0] bit `n` | target[7:0] | Jump to `{branch_pc[8], P}` if `SR[n] == v`. Same branch-page rule. |
@@ -89,7 +89,7 @@ Consequences (all tested):
 | Taken branch (`JMP`, `JHI`/`JLO`, `DJNZ`, `JSB`) | `accept(target) = commit(branch) + 3`; `commit(target) = commit(branch) + D(target) + 4` (for unconditional `target`), i.e. a **3-cycle penalty**. `JMP` and `HALT` are exempt from the `D >= 2` rule because their successor is flushed anyway. |
 | Not-taken branch | No penalty (follows sequential accept rule). |
 | Maximum spacing | `D = 65535` -> 65536 cycles = 1.31072 ms. The `DELAY n` pseudo-instruction chains `NOP`s for longer delays. |
-| Host `resume` / `pc_load` | `host_resume` and `host_pc_load` are honoured only while `halted && mem_free`. Pulsing `host_resume` in cycle `k_r` clears `halted` and `illegal` on cycle `k_r + 1` (`core_run` rises) and the first instruction is accepted in cycle `k_r + 4` (3 cycles after `core_run` rises) at `host_pc_val` if loaded, else `(last_halt_or_illegal_pc + 1) & 0x1FF` (or `0` after reset). |
+| Host `resume` / `pc_load` | `host_resume` and `host_pc_load` are honoured only while `halted && mem_free` (RTL: `src/ttpe_core.sv:L134-L141,L159,L231`). Pulsing `host_resume` in cycle `k_r` clears `halted` and `illegal` on cycle `k_r + 1` (`core_run` rises) and the first instruction is accepted in cycle `k_r + 4` (3 cycles after `core_run` rises) at `host_pc_val` if loaded, else `(last_halt_or_illegal_pc + 1) & 0x1FF` (or `0` after reset). |
 
 Worked example: `PINS high uio0 @5` as the first instruction: accepted in cycle 3, commit 9, pad changes in cycle 10.
 
@@ -123,28 +123,28 @@ are an assembly error (use a local `JMP`).
 
 ## 6. Example programs (`sw/examples`)
 
-All parameters are assembler `-D` values; every claim below is asserted in `sw/tests/test_examples.py`.
+All parameters are assembler `-D` values; every claim below is asserted in `sw/tests/test_examples.py`, `sw/tests/test_i2c_target.py`, and `sw/tests/test_spi_slave.py`.
 
 | Program | Parameters | Verified behaviour |
 |---|---|---|
 | `uart_tx.asm` | `BIT` cycles per bit (default 434 = 115200 baud) | Every bit boundary exactly `BIT` cycles apart; back-to-back frames exactly `10*BIT` apart (1 stop bit); start bit on the pad exactly 7 cycles after the host byte arrives; `BIT` 16 to 434 tested, `BIT` 8 rejected. |
 | `uart_rx.asm` | `BIT` (even) | Samples exactly at bit centres; 24-byte streams decoded at nominal rate and with about 2% baud mismatch; overrun counted. No framing, parity or stop-bit check. |
 | `spi_master.asm` | `CPOL`, `CPHA`, `H` half-period | Modes 0-3 data-exact; SCK half periods exactly `H` inside a byte; `H >= 12` (CPHA 0) or `>= 9` (CPHA 1), which is up to 2.08 / 2.78 MHz at 50 MHz. |
+| `spi_slave.asm` | `CPOL`, `CPHA` | Full-duplex SPI slave (38 words, zero RTL changes), Modes 0-3 data-exact in Python (`1.0 MHz` default `H=25`, zero-pad-delay ceilings `2.083 MHz` CPHA=0 / `1.250 MHz` CPHA=1); Mode 0 and Mode 3 verified in RTL lockstep (`b7143b9`). CPHA=0 uses length-prefixed TX FIFO `[n, d0..d(n-1)]`; CPHA=1 is variable-length framed by `CS_N`. |
 | `i2c_master.asm` | `TL`, `TH` (SCL low/high cycles), `DSH` | Write, read (last byte NACKed), address NACK -> error flag `uo7` + STOP, clock stretching. **Repeated START:** count byte `n[7] = 1` ends the transaction without STOP (bus held: SCL low, SDA released) and the next command byte starts with a repeated START (SCL low >= `TL`, tSU;STA = tHD;STA = exactly `TH`); `n[6:0]` is the byte count (0 = 256), so counts 128..255 are no longer expressible. Register read = host bytes `A0 81 REG A1 n`. SCL high exactly `TH`, low exactly `TL` inside a byte (longer between bytes). 100 kHz (`TL=TH=250`) and 400 kHz (`TL=75, TH=50`) meet the I2C minimum low/high times. |
+| `i2c_target.asm` | `ADDR` (7-bit, default `0x50`), `THD_DAT` (default `15`), `TSU_DAT` (default `65` for 100 kHz, `22` for 400 kHz) | I2C target (76 words, zero RTL changes): write, read with clock stretching, address mismatch NACK, repeated START (`Sr`), open-drain only; verified in two-ISS cross-tests with `i2c_master.asm` and 100 kHz / 400 kHz RTL lockstep. |
 | `usb_rx.asm` | none (needs MODE[0] = 1: `ttpe_usb_rx` virtual pins ui4..ui7) | Hybrid low-speed USB receive, see `USB_LS_RX.md`. |
 | `usb_tx.asm` | `EXT2`, `EXT5` (extra cycle after bit 2 / 5, default 1) | Low-speed USB transmit on D+ = `uio6`, D- = `uio7`, software only: host pushes `n, PID, payload/CRC...`; SYNC, NRZI (`PINS toggle` on 0 bits), bit stuffing (`C0` countdown), EOP (SE0 66 cycles, J 33, release). Cells 33/34 cycles (266 per byte), waveform checked cycle for cycle against `usb_ls.tx_expected`, loopback through `ttpe_usb_rx` model and `usb_rx.asm`. 72 words. CRC must be supplied by the host; FIFO must stay ahead of the wire (HPULL deadline = its commit cycle). |
 | `usb_device_ack.asm` | `EXT2`, `EXT5`, `PAD_D0`/`PAD_D1`/`PAD_IN` (turnaround padding per path, defaults 76/58/46) | Autonomous USB handshake (needs `MODE[0]` = 1): receive as `usb_rx.asm` (PID kept in `C0`), `WAIT high uio7` for the end of the host SE0, answer DATA0/DATA1 with ACK (0xD2) and IN with NAK (0x5A) using the `usb_tx.asm` byte loop; first K edge 140 cycles after the end of the host SE0 on every path. No CRC/address/toggle check; bad packets (stuff error, partial byte) get no response. 123 words. |
 
-Known limitations: I2C has no multi-master arbitration and no 10-bit addressing, and `n` values 128..255 now mean
-"count `n & 0x7F` with repeated START" (the count byte is no longer a plain 0..255 count); an aborted I2C write leaves its remaining
-bytes in the host TX FIFO until the host pulses `CTRL.tx_flush` (register `0x02` bit 2).
+Known limitations: I2C has no multi-master arbitration, no 10-bit addressing, and no 50 ns input spike filter; `i2c_master.asm` `n` values 128..255 mean "count `n & 0x7F` with repeated START" (the count byte is no longer a plain 0..255 count); an aborted I2C write leaves its remaining bytes in the host TX FIFO until the host pulses `CTRL.tx_flush` (register `0x02` bit 2); `spi_slave.asm` requires preloaded TX FIFO before `CS_N` falls and has up to 17-cycle `CS_N`->Hi-Z release in CPHA=1.
 
 ## 7. Verification status
 
-* 152 unit and protocol tests (including USB receive/transmit, exact slicer timing, autonomous ACK, I2C repeated START, and WP2(b) post-reset X/Z strictness), standard library only: `python3 -I -m unittest discover -s sw/tests -f`.
-* Fault injection: firmware/model mutation harness `sw/mutants_fw.py` (`python -I sw/mutants_fw.py`: 92 killed + 1 argued equivalent [`I14`] of 93).
-* The Execution Unit RTL is compared cycle by cycle with this model in cocotb lockstep (`make -C test TARGET=core`:
-  65/65 tests = 62 scenarios + 3 harness tests, including the 5 `usb_dev_*` scenarios), plus memory (`TARGET=mem`, 18), USB slicer (`TARGET=usb`, 8), chip-pin (`TARGET=top`, 16 with WP2(b) strict post-reset X/Z checking on all 24 output pins and explicit SRAM test initialization, no masking) — 107 PDK-SRAM cocotb tests total (259 primary tests with Python, plus 99 stub-SRAM cocotb tests), CI-verified on run `44706700512` (`df0cdcc`), and functional gate-level simulation (`gl_test`, `-DGL_TEST -DFUNCTIONAL`, zero-delay / not SDF-timed, 16/16) in CI at 8x4 (run `44706700541`, `df0cdcc`).
+* 186 unit, protocol, and ISA-contract-monitor tests (including USB receive/transmit, exact slicer timing, autonomous ACK, I2C master/target repeated START, SPI master/slave Modes 0-3, `IsaContractMonitor` rules + negative controls N1-N10, and WP2(b) post-reset X/Z strictness), standard library only: `python3 -I -m unittest discover -s sw/tests -f`.
+* Fault injection: firmware/model mutation harness `sw/mutants_fw.py` (`126` killed + `1` argued equivalent [`I14`] of `127`, last verified at `824c1be` before `test_isa_contract_mon.py` was added).
+* The Execution Unit RTL is compared cycle by cycle with this model in cocotb lockstep with a live `IsaContractMonitor` (`make -C test TARGET=core`:
+  70/70 tests = 66 scenarios + 4 harness tests, including `test_isa_monitor_negative_control`, 5 `usb_dev_*` scenarios, I2C target 100k/400k, and SPI slave Mode 0/3), plus memory (`TARGET=mem`, 18), USB slicer (`TARGET=usb`, 8), and chip-pin (`TARGET=top`, 16 with WP2(b) strict post-reset X/Z checking on all 24 output pins and explicit SRAM test initialization, no masking) — 112 PDK-SRAM cocotb tests total (298 primary tests with Python, plus 104 stub-SRAM cocotb tests), CI run on `b7143b9` (not re-run locally), and functional gate-level simulation (`gl_test`, `-DGL_TEST -DFUNCTIONAL`, zero-delay / not SDF-timed, 16/16) plus 8x4 GDS (`ERROR_ON_ILLEGAL_OVERLAPS=1`, `0` illegal overlaps, `0` KLayout DRC, LVS clear) and precheck in CI on `b7143b9` (not re-run locally).
   Nothing has run on silicon.
 
 ## 8. Open items
