@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "sw"))
 
 import ttpe_scenarios as scn                 # noqa: E402
 import ttpe_world as W                       # noqa: E402
+from isa_contract_mon import IsaContractError, IsaContractMonitor  # noqa: E402
 from ttpe_lockstep import (DefaultPolicy, Lockstep, LockstepError)  # noqa: E402
 
 CLK_NS = 20
@@ -214,6 +215,74 @@ async def test_engine_detects_mismatch(dut):
         assert "SR" in str(e), e
     else:
         raise AssertionError("lockstep engine did not notice a corrupted reference")
+
+
+@cocotb.test()
+async def test_isa_monitor_negative_control(dut):
+    """V1 negative control: record a real RTL trace, verify clean pass, then mutate commit timing."""
+    src = "LDI sr, 0x5A @2\nPINS high uio0 @4\nJMP done @2\nNOP @2\ndone: HALT\n"
+    words = scn.pad512(scn.asm_text(src))
+    await reset(dut)
+    await host_write_image(dut, words)
+
+    raw_dut = CocoDut(dut)
+    trace = []
+
+    class _TapDut:
+        def __init__(self, inner):
+            self._inner = inner
+            self._k = -1
+            self._S = None
+            self._inp = None
+
+        async def next_cycle(self):
+            await self._inner.next_cycle()
+            self._k += 1
+
+        def state(self):
+            self._S = self._inner.state()
+            return self._S
+
+        def drive(self, d):
+            self._inp = dict(d)
+            self._inner.drive(d)
+
+        async def mid_cycle(self):
+            await self._inner.mid_cycle()
+
+        def comb(self):
+            C = self._inner.comb()
+            trace.append((self._k, dict(self._S), dict(self._inp), dict(C)))
+            return C
+
+    ls = Lockstep(_TapDut(raw_dut), words, W.BusWorld(), DefaultPolicy(), "v1_negctl")
+    await ls.run(40)
+    ls.finish()
+
+    # 1. Clean recorded RTL trace must pass independent IsaContractMonitor
+    clean_mon = IsaContractMonitor("v1_clean")
+    for k, S, inp, C in trace:
+        clean_mon.pre_cycle(k, S)
+        clean_mon.post_cycle(k, S, inp, C)
+    assert clean_mon.commits_checked >= 3
+
+    # 2. Mutate recorded RTL trace: delay PINS commit by +1 cycle -> monitor MUST fire C2-late
+    mut = [(k, dict(S), dict(inp), dict(C)) for k, S, inp, C in trace]
+    commits = [i for i, (_, _, _, C) in enumerate(mut) if C["commit"]]
+    c_idx = commits[1]
+    mut[c_idx][3]["commit"] = 0
+    mut[c_idx + 1][3]["commit"] = 1
+    mut_mon = IsaContractMonitor("v1_mutated")
+    fired = None
+    try:
+        for k, S, inp, C in mut:
+            mut_mon.pre_cycle(k, S)
+            mut_mon.post_cycle(k, S, inp, C)
+    except IsaContractError as e:
+        fired = str(e)
+    assert fired is not None and "C2-late" in fired, (
+        "IsaContractMonitor failed to catch +1-cycle commit mutation: %r" % (fired,)
+    )
 
 
 # ------------------------------------------------------------------ scenario registry

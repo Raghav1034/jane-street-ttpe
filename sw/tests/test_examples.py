@@ -465,7 +465,9 @@ class I2cRepeatedStart(unittest.TestCase):
 class AllExamples(unittest.TestCase):
     def test_program_sizes(self):
         sizes = {fn: sum(load(fn).used) for fn in sorted(os.listdir(EX_DIR)) if fn.endswith(".asm")}
-        self.assertEqual(set(sizes), {"uart_tx.asm", "uart_rx.asm", "spi_master.asm", "i2c_master.asm",
+        self.assertEqual(set(sizes), {"uart_tx.asm", "uart_rx.asm", "spi_master.asm",
+                                    "spi_slave.asm", # WP4b: software-only SPI slave (Modes 0..3)
+                                    "i2c_master.asm",
                                     "i2c_target.asm", # WP4a: software-only I2C target (100 kHz default)
                                     "usb_rx.asm",    # usb_rx: needs the ttpe_usb_rx primitive (MODE[0] = 1)
                                     "usb_tx.asm",    # usb_tx: software only, D+ = uio6, D- = uio7
