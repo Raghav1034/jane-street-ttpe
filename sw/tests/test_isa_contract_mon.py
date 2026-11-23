@@ -347,6 +347,32 @@ class TestIsaContractMonitor(unittest.TestCase):
             replay_trace(mut, "N9-mut")
         self.assertIn("C2-hpull", str(cm.exception))
 
+    def test_neg_N10_hpush_full_same_cycle_rx_pop(self):
+        """Negative control N10 (M5): HPUSH while rx_full=1 with same-cycle rx_pop=1 must still
+        increment rx_overrun; suppressing that increment in the trace -> C3-state fires."""
+        # LDI commits at k=7; HPUSH #1..#8 commit at k=10..31 (rx_full=1 from k=32); HPUSH #9 commits at k=34.
+        src = "LDI sr, 0xA5 @2\n" + ("HPUSH @2\n" * 9) + "HALT\n"
+
+        def pop_on_9th_hpush(ls, S):
+            return {"rx_pop": True} if S["rx_full"] and ls.k == 34 else {}
+
+        tr = record_program(src, policy=DefaultPolicy(rx_drain=False, extra=pop_on_9th_hpush), cycles=50)
+        replay_trace(tr, "N10-clean")
+        hits = [
+            i for i, (_, S, inp, C) in enumerate(tr)
+            if C["commit"] and S["rx_full"] and inp["rx_pop"]
+        ]
+        self.assertEqual(len(hits), 1, "expected exactly one HPUSH commit with rx_full=1 and rx_pop=1")
+        idx = hits[0]
+        self.assertEqual(tr[idx + 1][1]["rx_overrun"], tr[idx][1]["rx_overrun"] + 1)
+        mut = copy.deepcopy(tr)
+        # Mutate: pretend same-cycle rx_pop freed a slot and prevented overrun
+        mut[idx + 1][1]["rx_overrun"] = mut[idx][1]["rx_overrun"]
+        with self.assertRaises(IsaContractError) as cm:
+            replay_trace(mut, "N10-mut")
+        self.assertIn("C3-state", str(cm.exception))
+        self.assertIn("rx_overrun", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

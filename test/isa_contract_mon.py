@@ -428,12 +428,15 @@ class IsaContractMonitor:
                     want_pc_load = (nv != 0)
                     branch_target = (cur_pc & 0x100) | p
                 elif op == OP_HPUSH:
-                    # Overrun rule (docs/ISA.md §2): if full (and not flushed/popped), increment saturating at 255
-                    if not bool(inp.get("rx_fifo_flush", 0)):
-                        if bool(S["rx_full"]) and not bool(inp.get("rx_pop", 0)):
-                            exp["rx_overrun"] = min(255, S["rx_overrun"] + 1)
-                        elif not bool(S["rx_full"]):
-                            exp["rx_overrun"] = S["rx_overrun"]
+                    # Overrun rule (docs/ISA.md §2): evaluated against start-of-cycle rx_full;
+                    # drops and increments (saturating at 255) even if rx_pop=1 in the same cycle.
+                    # rx_fifo_flush overrides HPUSH and clears rx_overrun to 0 at the cycle edge.
+                    if bool(inp.get("rx_fifo_flush", 0)):
+                        exp["rx_overrun"] = 0
+                    elif bool(S["rx_full"]):
+                        exp["rx_overrun"] = min(255, S["rx_overrun"] + 1)
+                    else:
+                        exp["rx_overrun"] = S["rx_overrun"]
                 elif op == OP_HPULL:
                     exp["sr"] = None  # populated from TX FIFO head (not exposed in S)
                 elif op == OP_HALT:
