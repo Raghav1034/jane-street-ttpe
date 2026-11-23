@@ -12,18 +12,19 @@ integers; one cycle is 20 ns at 50 MHz.
 
 | State | Width | Notes |
 |---|---|---|
-| PC | 9 | Word address into the 512 x 32 SRAM. Wraps 511 -> 0. Unused words should hold `HALT` (the assembler fills them). |
+| PC | 9 | Word address (`0x000..0x1FF`) into the 512 x 32 SRAM. Sequential execution crosses page boundaries (`0x0FF -> 0x100`) freely and wraps `0x1FF -> 0x000`. Unused words should hold `HALT` (the assembler fills them). |
 | SR | 8 | Shift/data register. Full-duplex shifting uses this single register. |
 | C0, C1 | 8 + 8 | Loop counters. |
 | uio_out, uio_oe | 8 + 8 | Output latch and output enable of the 8 bidirectional pins. |
 | uo_out | 8 | The 8 dedicated outputs. |
-| Input synchroniser | 2 x 16 | 2-flop synchroniser for `uio_in[7:0]` and `ui_in[7:0]`. Resets to 0. |
-| Host TX FIFO | bytes | Host to engine. Read by `HPULL`. |
-| Host RX FIFO | bytes | Engine to host. Written by `HPUSH`. Reference model depth 8. |
-| Flags | | `halted`, `illegal` (sticky), RX-overrun count. |
+| Input synchroniser | 2 x 16 | 2-flop synchroniser (`s1`, `s2`) plus 1-cycle history (`s3`) for `uio_in[7:0]` and `ui_in[7:0]`. Resets to 0 and free-runs every clock cycle even while `halted = 1` (section 4). |
+| Host TX FIFO | 8 x 8 | Host to engine (depth 8, registered start-of-cycle `empty`/`full`). Read by `HPULL`. |
+| Host RX FIFO | 8 x 8 | Engine to host (depth 8, registered start-of-cycle `empty`/`full`). Written by `HPUSH`. |
+| Flags | | `halted` (resets to **1** in RTL), `illegal` (sticky; cleared on `host_resume` or `core_reset`), `rx_overrun` (8-bit saturating counter, clamped at `255`, cleared by `rx_fifo_flush`). |
 
-All state resets to 0. Pin numbering: **sources** 0-7 = `uio_in[0..7]`, 8-15 = `ui_in[0..7]`;
-**sinks** 0-7 = `uio[0..7]`, 8-15 = `uo_out[0..7]`.
+On hardware reset (`rst_n`), all architectural state resets to `0` **except `halted = 1`** (the core stays halted until `host_resume` is pulsed while `halted && mem_free`). *Standalone-ISS modelling note:* `sw/ttpe_iss.py` intentionally models execution starting at `core_run = 1` (`halted = False`, cycle `0`) and freezes its internal synchroniser and USB bit slicer while `halted = True`; the RTL behaviour (`halted = 1` at reset, free-running synchroniser/USB slicer) is the specification truth (see section 4 for why halted-cycle synchroniser differences are unobservable to ISA v0.2 programs).
+
+Pin numbering: **sources** 0-7 = `uio_in[0..7]`, 8-15 = `ui_in[0..7]`; **sinks** 0-7 = `uio[0..7]`, 8-15 = `uo_out[0..7]`.
 
 ## 2. Instruction word
 
@@ -39,26 +40,26 @@ All state resets to 0. Pin numbering: **sources** 0-7 = `uio_in[0..7]`, 8-15 = `
 | OP | Mnemonic | A | P | Action |
 |---|---|---|---|---|
 | 0 | `NOP` | - | - | Nothing. Consumes time. |
-| 1 | `PINS` | [3] bank (0 uio, 1 uo), [1:0] mode: 0 low, 1 high, 2 float, 3 toggle | pin mask (bit i = pin i of the bank) | Changes all masked pins in **one** cycle. low/high/toggle also enable the output. `float` clears OE and keeps the latched value (open-drain idiom). `float` on `uo` is a no-op (assembler rejects it). |
-| 2 | `WAIT` | source pin (0-15) | [1:0] 0 low, 1 high, 2 fall, 3 rise | Blocks until the condition holds (section 4). |
-| 3 | `JMP` | [0] = target bit 8 | target[7:0] | Unconditional jump, any page. |
-| 4 | `JHI` | source pin | target[7:0] | Jump if pin is 1. Target is in the **same 256-word page** as the branch. |
-| 5 | `JLO` | source pin | target[7:0] | Jump if pin is 0. Same page rule. |
-| 6 | `SHOUT` | sink pin (0-15) | [0] msb-first, [1] shift after, [2] open-drain (uio only) | Drives `SR[7]` (msb) or `SR[0]` (lsb) onto the pin. Open-drain: latch <- 0, OE <- not bit. Optional shift (fill 0). |
-| 7 | `SAMPLE` | source pin | [0] msb-first | msb-first: `SR <- {SR[6:0], pin}`. lsb-first: `SR <- {pin, SR[7:1]}`. |
+| 1 | `PINS` | [3] bank (0 uio, 1 uo), [1:0] mode: 0 low, 1 high, 2 float, 3 toggle (`A[2]` ignored) | pin mask (bit i = pin i of the bank) | Changes all masked pins in **one** cycle. `low`/`high`/`toggle` also set `uio_oe` = 1 on `uio`. `float` clears `uio_oe` and keeps `uio_out` unchanged (open-drain idiom). `float` on `uo` is a no-op (assembler rejects it). |
+| 2 | `WAIT` | source pin (0-15) | [1:0] 0 low, 1 high, 2 fall, 3 rise (`P[7:2]` ignored) | Blocks until the condition holds (section 4). |
+| 3 | `JMP` | [0] = target bit 8 (`A[3:1]` ignored) | target[7:0] | Unconditional jump to `{A[0], P}` (any page). |
+| 4 | `JHI` | source pin (0-15) | target[7:0] | Jump to `{branch_pc[8], P}` if synchronised pin is 1. Uses the **branch instruction's own** address bit 8 (even at `0x0FF` or `0x1FF`, where prefetch PC has already incremented). |
+| 5 | `JLO` | source pin (0-15) | target[7:0] | Jump to `{branch_pc[8], P}` if synchronised pin is 0. Same branch-page rule. |
+| 6 | `SHOUT` | sink pin (0-15) | [0] msb-first, [1] shift after, [2] open-drain (uio only); `P[7:3]` ignored | Extracts `bit = P[0] ? SR[7] : SR[0]`. On `uio[0..7]` (`A < 8`): push-pull (`P[2] = 0`) sets `uio_oe[A] <- 1` and `uio_out[A] <- bit`; open-drain (`P[2] = 1`) sets `uio_out[A] <- 0` and `uio_oe[A] <- ~bit`. On `uo_out[0..7]` (`A >= 8`): `P[2]` is ignored and `uo_out[A-8] <- bit` (assembler rejects `od` on `uo`). If `P[1] = 1`, shifts `SR` after reading `bit` (`{SR[6:0], 0}` if `P[0] = 1`, `{0, SR[7:1]}` if `P[0] = 0`). |
+| 7 | `SAMPLE` | source pin (0-15) | [0] msb-first (`P[7:1]` ignored) | msb-first: `SR <- {SR[6:0], pin}`. lsb-first: `SR <- {pin, SR[7:1]}`. |
 | 8 | `REG` | sub-op (below) | immediate | Register operations. |
-| 9 | `DJNZ` | [0] counter (C0/C1) | target[7:0] | `C <- C-1` (8-bit wrap); jump if the new value is non-zero. Same page rule. `LDI C,0` therefore loops 256 times. |
-| A | `HPUSH` | - | - | Push SR to the host RX FIFO. If full: byte dropped, overrun count incremented. Never blocks. |
-| B | `HPULL` | - | - | Blocks until the host TX FIFO has a byte, then `SR <- byte`. |
-| C | `HALT` | - | - | Stop the core. Host can resume; execution continues after the `HALT`. |
-| D | `JSB` | [3] polarity v, [2:0] bit n | target[7:0] | Jump if `SR[n] == v`. Same page rule. |
+| 9 | `DJNZ` | [0] counter (0=`C0`, 1=`C1`; `A[3:1]` ignored) | target[7:0] | `C <- (C - 1) & 0xFF`; jump to `{branch_pc[8], P}` if the new value is non-zero. Same branch-page rule. `LDI C,0` therefore loops 256 times. |
+| A | `HPUSH` | - (ignored) | - (ignored) | Push `SR` to the 8-deep host RX FIFO. Never blocks. Evaluated against start-of-cycle `rx_full`: if `rx_full = 1`, the byte is dropped and `rx_overrun` increments (saturating at `255`) **even if the host asserts `rx_pop = 1` in the same cycle**. `rx_fifo_flush` overrides `HPUSH` and clears the FIFO and `rx_overrun` at the cycle edge. |
+| B | `HPULL` | - (ignored) | - (ignored) | Blocks until start-of-cycle `tx_empty = 0`, then `SR <- tx_rdata` and pops the TX FIFO. A host `tx_push` in cycle `X` is first visible to `HPULL` in cycle `X + 1`. If `tx_fifo_flush` occurs in the same cycle an `HPULL` commits, `HPULL` still reads the pre-flush head byte and the FIFO is empty next cycle. |
+| C | `HALT` | - (ignored) | - (ignored) | Stop the core (`halted <- 1`). Host can resume; unless overridden by `host_pc_load`, execution continues at `(halt_pc + 1) & 0x1FF`. |
+| D | `JSB` | [3] polarity `v`, [2:0] bit `n` | target[7:0] | Jump to `{branch_pc[8], P}` if `SR[n] == v`. Same branch-page rule. |
 | E, F | reserved | | | Treated as illegal. |
 
 `REG` sub-ops (A): 0 `LDI sr`, 1 `LDI c0`, 2 `LDI c1`, 3 `MOV c0,sr`, 4 `MOV c1,sr`, 5 `MOV sr,c0`,
-6 `MOV sr,c1`, 8 `XORI sr`, 9 `ANDI sr`, 10 `ORI sr`, 11 `ADDI sr` (mod 256). Other values are illegal.
+6 `MOV sr,c1`, 8 `XORI sr`, 9 `ANDI sr`, 10 `ORI sr`, 11 `ADDI sr` (mod 256). Sub-ops `7` and `12..15` are illegal.
 
-**Illegal instruction** (reserved opcode or sub-op): the core halts and sets the sticky `illegal` flag.
-Reserved bits in `A`/`P` are ignored by the reference model and are always emitted as 0 by the assembler.
+**Illegal instruction** (reserved opcode `0xE`/`0xF` or illegal `REG` sub-op): executes its `D` countdown like an unconditional instruction and commits at `A + 1 + D`, halting the core (`halted <- 1`) and setting sticky `illegal <- 1`. A subsequent `host_resume` (while `halted && mem_free`) clears both `halted` and `illegal` and continues at `(illegal_pc + 1) & 0x1FF` unless `host_pc_load` loads a different address.
+Reserved bits in `A`/`P` (as noted per opcode above) are ignored by hardware and the reference model and are always emitted as 0 by the assembler.
 
 ## 3. Execution timing (the contract for the Execution Unit RTL)
 
@@ -81,13 +82,14 @@ Consequences (all tested):
 
 | Situation | Rule |
 |---|---|
-| Sequential, `D >= 2` | `commit(N+1) = commit(N) + D(N+1) + 1`. Fetch latency is fully hidden. |
-| Sequential, `D(N) < 2` | The successor is late: add `2 - D(N)` cycles. The assembler rejects `D < 2` unless `--allow-short-delta`. |
+| Sequential accept (general) | `accept(N+1) = max(accept(N) + 3, commit(N))`. |
+| Sequential, `D(N) >= 2` | `commit(N+1) = commit(N) + D(N+1) + 1` (for unconditional `N+1`). Fetch latency is fully hidden. |
+| Sequential, `D(N) < 2` | For an **unconditional** predecessor `N`, `accept(N+1)` is delayed by `2 - D(N)` cycles (`commit(N+1) = commit(N) + (2 - D(N)) + D(N+1) + 1`). For a **blocking** predecessor `N` (`WAIT`/`HPULL`), the delay is `max(0, accept(N) + 3 - commit(N))` — zero if `N` waited until `commit(N) >= accept(N) + 3`. The assembler rejects `D < 2` unless `--allow-short-delta`. |
 | Minimum spacing | 3 cycles (60 ns). Use a single `PINS` with a mask to change several pins in one cycle. |
-| Taken branch (`JMP`, `JHI`/`JLO`, `DJNZ`, `JSB`) | `commit(target) = commit(branch) + D(target) + 4`, i.e. a **3-cycle penalty**. `JMP` and `HALT` are exempt from the `D >= 2` rule because their successor is flushed anyway. |
-| Not-taken branch | No penalty. |
+| Taken branch (`JMP`, `JHI`/`JLO`, `DJNZ`, `JSB`) | `accept(target) = commit(branch) + 3`; `commit(target) = commit(branch) + D(target) + 4` (for unconditional `target`), i.e. a **3-cycle penalty**. `JMP` and `HALT` are exempt from the `D >= 2` rule because their successor is flushed anyway. |
+| Not-taken branch | No penalty (follows sequential accept rule). |
 | Maximum spacing | `D = 65535` -> 65536 cycles = 1.31072 ms. The `DELAY n` pseudo-instruction chains `NOP`s for longer delays. |
-| Resume after `HALT` | Pipeline restarts like `core_run` 0 -> 1: next instruction accepted 3 cycles after resume. |
+| Host `resume` / `pc_load` | `host_resume` and `host_pc_load` are honoured only while `halted && mem_free`. Pulsing `host_resume` in cycle `k_r` clears `halted` and `illegal` on cycle `k_r + 1` (`core_run` rises) and the first instruction is accepted in cycle `k_r + 4` (3 cycles after `core_run` rises) at `host_pc_val` if loaded, else `(last_halt_or_illegal_pc + 1) & 0x1FF` (or `0` after reset). |
 
 Worked example: `PINS high uio0 @5` as the first instruction: accepted in cycle 3, commit 9, pad changes in cycle 10.
 
@@ -97,13 +99,11 @@ pass 1 identical to later passes. All four examples use this.
 
 ## 4. Input and output timing
 
-* Input synchroniser: a pad change in cycle X is first seen by an instruction committing in cycle **X+2**
-  (an instruction committing in X+1 still sees the old value).
-* `WAIT low/high` is level-sensitive. `WAIT fall/rise` compares the synchronised value in the commit cycle with
-  the previous cycle. **An edge that completes before the delta countdown ends is missed.**
-* The synchroniser resets to 0, so a pad that is high at reset produces a rising edge at cycle 2. Do not `WAIT rise`
-  in the first few cycles.
-* `SAMPLE` committing in cycle e reads the pad as it was in cycle e-2.
+* Input synchroniser: a pad change in cycle `X` is first seen by an instruction committing in cycle **`X + 2`** (`sync2(c) = pad(c - 2)`; an instruction committing in `X + 1` still sees the old value).
+* `WAIT low/high` is level-sensitive on `sync2(c)`. For a `WAIT` accepted in cycle `A` with delta `D`, condition checks start on cycle `E = A + 1 + D` (inclusive) and repeat on every cycle `c >= E` until true. `WAIT fall/rise` compares `sync2(c) = pad(c - 2)` against `sync2(c - 1) = pad(c - 3)`: a pad transition at cycle `E - 2` (visible on `sync2` at cycle `E`, including `c = A + 1` when `D = 0`) **is caught** on cycle `E`; any pad transition at cycle `<= E - 3` (already visible on `sync2` at `<= E - 1`) is **missed**.
+* The synchroniser resets to `0` on `rst_n` and **free-runs every clock cycle even while `halted = 1`**. Because the earliest instruction commit after `host_resume` (cycle `k_r`) is cycle `k_r + 5` (`accept` at `k_r + 4`, `D = 0`), three active cycles (`k_r + 1..k_r + 3`) always flush `s1`/`s2`/`s3` before any program reads them; no post-reset cycle-2 rising edge is ever observable after resume, and standalone ISS (`halted = False` at cycle `0`) produces identical instruction-visible values.
+* Virtual USB source pins: when host register `MODE[0] = 1` (`usb_en = 1`, `docs/USB_LS_RX.md`), source pins `12..15` (`ui_in[7:4]`) load the synchronous `ttpe_usb_rx` outputs `{ERR, STOP, DATA, TICK}` into `s2[15:12]` instead of the physical pads, bypassing the physical pad-to-`s2` path on those four sources (sources `0..11` are unaffected). Note that in RTL `ttpe_usb_rx` free-runs while halted, whereas standalone ISS freezes it while halted; change `MODE[0]` only while the USB bus is idle (`J`).
+* `SAMPLE` committing in cycle `e` reads `sync2(e)` (the physical pad as it was in cycle `e - 2`, or the virtual USB pin on sources `12..15` when `MODE[0] = 1`).
 * Pad and board delays are not included: the pad characterisation for this process is not yet available.
 
 ## 5. Assembler (`sw/ttpe_asm.py`, Python 3 standard library only)
