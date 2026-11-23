@@ -35,6 +35,7 @@ ISS time  `iss.cycle`: stops while the core is halted, restarts at host_resume. 
 """
 
 import ttpe_isa as isa
+from isa_contract_mon import IsaContractMonitor
 
 CLK_NS = 20
 MAX_TX = 8
@@ -181,6 +182,8 @@ class Lockstep:
         self._rd_expect = {}                # cycle -> (addr, data)
         self._wd_expect = set()
         self._last_pins = (0, 0, 0)
+        # Independent docs/ISA.md contract monitor (V1: zero ISS calls)
+        self.isa_mon = IsaContractMonitor(name=name)
 
     # ------------------------------------------------------------------ helpers
     def fail(self, msg):
@@ -222,6 +225,7 @@ class Lockstep:
         await d.next_cycle()
         S = d.state()
         self.last_state = S
+        self.isa_mon.pre_cycle(self.k, S)
         self._check_pre(S)
         act = self.policy(self, S) or {}
 
@@ -255,6 +259,7 @@ class Lockstep:
         d.drive(inp)
         await d.mid_cycle()
         C = d.comb()
+        self.isa_mon.post_cycle(self.k, S, inp, C)
 
         # ---- host SRAM port expectations
         gnt_exp = bool(act.get("host_req")) and bool(S["mem_free"])
