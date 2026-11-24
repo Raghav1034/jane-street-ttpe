@@ -47,7 +47,7 @@ All inputs are sampled at the edge that ends the cycle in which they are applied
 | What | Status |
 |---|---|
 | `test/test_ttpe_core.py` on the real RTL under Icarus + cocotb | 70/70 tests (66 scenarios + 4 harness tests, live `IsaContractMonitor` + negative control; PDK + stub, CI run on `b7143b9`, not re-run locally). |
-| `sw/tests` | 186/186 tests pass (`python -I -m unittest discover -s sw/tests -f`, incl. WP2(b) post-reset X/Z strictness, I2C target, SPI slave, and `IsaContractMonitor` N1–N10); mutation harness `sw/mutants_fw.py`: `126` killed + `1` argued equivalent (`I14`) of `127` (verified at `824c1be`). |
+| `sw/tests` | 186/186 tests pass (`python -I -m unittest discover -s sw/tests -f`, incl. WP2(b) post-reset X/Z strictness, I2C target, SPI slave, and `IsaContractMonitor` N1–N10); mutation harness `sw/mutants_fw.py`: `126` killed + `1` argued equivalent (`I14`) of `127` (verified at `cb817bc`, Python 3.14.3, 2026-11-23). |
 | Synthesis, area, timing | Hardened and CI-verified at 8x4 (`gds` with `ERROR_ON_ILLEGAL_OVERLAPS=1` and `0` illegal overlaps, `0` KLayout DRC, LVS clear, `precheck` clear, functional `gl_test` 16/16 with `-DGL_TEST -DFUNCTIONAL`, zero-delay / not SDF-timed; CI run on `b7143b9`, not re-run locally; see `docs/PHASE_E_REPORT.md` §1.8). |
 
 `ttpe_exec.sv` no longer uses constant bit-selects inside `always_comb` (named wires instead), which

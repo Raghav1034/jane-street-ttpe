@@ -1,6 +1,6 @@
 ; usb_rx.asm - low-speed USB (1.5 Mbit/s) packet receiver using the ttpe_usb_rx
 ; bit-slicer primitive (src/ttpe_usb_rx.sv, docs/USB_LS_RX.md), enabled via MODE[0] = 1
-; and verified in RTL lockstep (TARGET=core) and functional gate-level simulation (gl_test).
+; and verified in RTL lockstep (TARGET=core) and functional gl_test (test_t_usb_rx_e2e).
 ;
 ; Virtual source pins (valid only while USBEN is set; they replace ui4..ui7):
 ;   ui4 TICK  1-cycle pulse per decoded data bit (NRZI decoded, stuffed bits removed) and one at packet end
